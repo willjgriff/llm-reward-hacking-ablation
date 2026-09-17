@@ -30,6 +30,7 @@ class Stage1Config(BaseModel):
     splits: list[Literal["original", "oneoff", "conflicting"]]
     agent_types: list[Literal["minimal", "tools"]]
     limit: int | None = None
+    offset: int = 0
     task_ids: list[str] | None = None
     shuffle: bool = True
     samples_per_task: int = 1
@@ -54,7 +55,8 @@ def add_config_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--vllm-base-url")
     parser.add_argument("--splits", nargs="+")
     parser.add_argument("--agent-types", nargs="+")
-    parser.add_argument("--limit", type=int)
+    parser.add_argument("--limit", type=int, help="number of tasks; 0 = all remaining after --offset")
+    parser.add_argument("--offset", type=int, help="skip this many tasks of the shuffled order first")
     parser.add_argument("--task-ids", nargs="+")
     parser.add_argument("--samples-per-task", type=int)
     parser.add_argument("--sandbox")
@@ -65,9 +67,11 @@ def load_config(args: argparse.Namespace) -> Stage1Config:
     raw: dict[str, Any] = yaml.safe_load(args.config.read_text())
     for key in (
         "run_id", "output_dir", "model", "model_revision", "vllm_base_url", "splits",
-        "agent_types", "limit", "task_ids", "samples_per_task", "sandbox", "max_connections",
+        "agent_types", "limit", "offset", "task_ids", "samples_per_task", "sandbox", "max_connections",
     ):
         value = getattr(args, key, None)
         if value is not None:
             raw[key] = value
+    if raw.get("limit") == 0:
+        raw["limit"] = None
     return Stage1Config.model_validate(raw)

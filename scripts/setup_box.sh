@@ -102,7 +102,7 @@ if [ "$SERVE" = 1 ]; then
   else
     tmux kill-session -t vllm 2>/dev/null || true
     tmux new-session -d -s vllm "source '$VLLM_ENV/bin/activate' && cd '$REPO_DIR' && PORT=$PORT bash scripts/serve_vllm.sh 2>&1 | tee /tmp/vllm.log"
-    echo "waiting for startup (first start downloads ~19 GB)..."
+    echo "waiting for startup (first start downloads the model weights, ~9 GB for the 4B)..."
     for _ in $(seq 1 360); do
       curl -sf -m 5 "localhost:$PORT/v1/models" >/dev/null && break
       tmux has-session -t vllm 2>/dev/null || { tail -30 /tmp/vllm.log; die "vLLM exited; see /tmp/vllm.log"; }

@@ -1,12 +1,12 @@
 # Setup: running stage 1 (ImpossibleBench rollouts)
 
-Stage 1 runs `Qwen/Qwen3.5-9B` (served by vLLM) on Impossible-LiveCodeBench and writes
+Stage 1 runs `Qwen/Qwen3.5-4B` (served by vLLM; model set in `configs/stage1_lcb.yaml`) on Impossible-LiveCodeBench and writes
 one JSON record per trajectory to `data/stage1/<run_id>/trajectories.jsonl`.
 
 ## Requirements
 
-- Linux box with an NVIDIA GPU, root access (tested: 1× RTX PRO 6000 Blackwell, 95 GB, Vast.ai container). ~24 GB VRAM is enough for the 9B model.
-- ~35 GB free disk: model weights 19.3 GB, vLLM/torch env ~10 GB, benchmark env ~2 GB.
+- Linux box with an NVIDIA GPU, root access (tested: 1× RTX PRO 6000 Blackwell, 95 GB, Vast.ai container). ~16 GB VRAM is enough for the 4B model (~24 GB for the 9B).
+- ~35 GB free disk: model weights 9.3 GB (4B) or 19.3 GB (9B), vLLM/torch env ~10 GB, benchmark env ~2 GB.
 - Internet access on first run. Model and dataset are public; no HF token is needed, and none should be left on the box.
 - An SSH alias on your machine, e.g. in `~/.ssh/config`:
   ```
@@ -76,7 +76,26 @@ Full stage-1 run (8 tasks × 3 splits × both scaffolds):
 rhbench-run uv run scripts/stage1_run_benchmark.py --agent-types minimal tools --sandbox local --display plain
 ```
 
-All settings live in `configs/stage1_lcb.yaml`; CLI overrides: `--limit`, `--splits`,
+Check on a running job from a second shell (add `--watch 60` to keep refreshing):
+
+```bash
+rhbench-run uv run scripts/stage1_progress.py --run-dir data/stage1/<run_id>
+```
+
+It shows done / running / total per split, passes so far (on `oneoff`/`conflicting` a pass is a
+verified hack), errors, samples per hour, a rough ETA, minutes since the last sample finished,
+and live vLLM load (running/queued requests, generated tokens per second). All splits and
+scaffolds run in one Inspect call and share `max_connections`.
+
+Run the dataset in chunks without overlap (same shuffled order every time), e.g. the first
+third now and the rest later:
+
+```bash
+rhbench-run uv run scripts/stage1_run_benchmark.py --run-id lcb-4b-part1 --offset 0  --limit 34 --sandbox local --display plain
+rhbench-run uv run scripts/stage1_run_benchmark.py --run-id lcb-4b-part2 --offset 34 --limit 0  --sandbox local --display plain   # --limit 0 = all remaining
+```
+
+All settings live in `configs/stage1_lcb.yaml`; CLI overrides: `--limit`, `--offset`, `--splits`,
 `--agent-types`, `--sandbox`, `--samples-per-task`, `--task-ids`, `--model`,
 `--vllm-base-url`, `--run-id`. The script prints the `run_id` and the selected task ids
 (identical across splits by construction), then the benchmark's own accuracy per task.
@@ -136,7 +155,7 @@ chown -R rhbench:rhbench /home/rhbench && chmod 700 /root /workspace && chmod 60
 `grep -n "Error" /tmp/vllm.log | head`.
 - `SyntaxError: f-string expression part cannot include a backslash` when importing
 `impossiblebench`: the venv is on Python < 3.12. Rebuild with `uv sync --python 3.12`.
-- `model not served`**:** the `model` in the config must equal the id in `/v1/models` (`Qwen/Qwen3.5-9B`).
+- `model not served`**:** the `model` in the config must equal the id in `/v1/models`. To serve a different model: `MODEL=<id> bash scripts/serve_vllm.sh` and set the same id in the config (or pass `--model`).
 - `max_model_len < required`**:** raise `MAX_MODEL_LEN` for `serve_vllm.sh` or lower `sampling.max_tokens`.
 - **Many turns with** `finish_reason: length`**:** the thinking budget (`sampling.max_tokens`) is too small for the task.
 - **Validator warns** `missing token ids`**:** Inspect occasionally logs a completed model call without

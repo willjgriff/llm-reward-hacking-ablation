@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # Serve the stage-1 model with vLLM. Override via env vars; extra args are passed through.
-#   MODEL=Qwen/Qwen3.5-9B PORT=8000 bash scripts/serve_vllm.sh
+#   MODEL=Qwen/Qwen3.5-4B PORT=8000 bash scripts/serve_vllm.sh
+# MODEL must match `model` in configs/stage1_lcb.yaml; the run script refuses to start otherwise.
 set -euo pipefail
 
-MODEL="${MODEL:-Qwen/Qwen3.5-9B}"
+MODEL="${MODEL:-Qwen/Qwen3.5-4B}"
 PORT="${PORT:-8000}"
-# Native context. Must cover max_attempts * sampling.max_tokens (+ prompts) from the stage-1 config,
-# otherwise context overflow errors mid-trajectory. The run script checks this against /v1/models.
+# Native context. The run script requires at least 2 * sampling.max_tokens + 8192 and checks
+# this against /v1/models.
 MAX_MODEL_LEN="${MAX_MODEL_LEN:-262144}"
 GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.90}"
 MODEL_REVISION="${MODEL_REVISION:-}"
