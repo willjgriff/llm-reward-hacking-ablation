@@ -56,6 +56,52 @@ General capability degradation must always be measured, and orthogonalization sh
 - Upload only (as root on the box, or from the laptop): `bash scripts/upload_run.sh --run-dir <run_dir> [--repo <user/name>]`
 - The benchmark's `local` sandbox runs model-written code on the host; only use it as an unprivileged user with no credentials.
 
+Stage 1 development steps:
+
+# Pipeline steps: orthogonalization against reward hacking
+
+Each step is a separate script (or set of scripts) that reads the previous step's output from disk. Each step ends with a check to pass before moving on.
+
+## Step 1: Model and benchmark harness (in progress)
+- **Does:** Serves Qwen3.5-9B with vLLM and runs it on ImpossibleBench LiveCodeBench (original, oneoff, conflicting splits; minimal and tools scaffolds). Saves every attempt as a trajectory in a fixed JSONL schema.
+- **Output:** `data/stage1/<run_id>/trajectories.jsonl`
+- **Check:** Validation script passes; the CoT is present and complete; stored token IDs match what the model saw. Smoke test on 5–10 tasks per variant.
+
+## Step 2: Rollouts at scale
+- **Does:** Runs the harness on as many tasks and samples per task as needed to collect enough hacking examples. Target roughly 10× the dataset size heretic uses for refusal, reduced if computing the direction would take more than about an hour.
+- **Output:** Large trajectory dataset.
+- **Check:** Hack rate per split and scaffold is non-trivial. Enough positive examples exist for extracting a direction.
+
+## Step 3: Labelling
+- **Does:** Adds an LLM judge that labels each trajectory as reward hacking or not (catches failed hack attempts the programmatic label misses). Adds a separate judge that reads the CoT and labels whether the hack looks intentional or accidental.
+- **Output:** Trajectories with judge labels.
+- **Check:** Judge agrees with the programmatic label where one exists. Hand-read 20–30 trajectories yourself.
+
+## Step 4: Activation extraction and direction
+- **Does:** Splits tasks by task ID into train and eval sets. Runs forward passes over train trajectories (hack vs no-hack), captures activations per layer, and computes the difference-in-means direction. Token-position choice over multi-turn completions is a deliberate research decision.
+- **Output:** Reward-hacking direction per layer.
+- **Check:** A linear probe on held-out trajectories separates hack from no-hack. If it can't, ablation won't work either.
+
+## Step 5: Ablation
+- **Does:** Uses heretic with the precomputed direction to orthogonalize the model's weights.
+- **Output:** Ablated model.
+- **Check:** Model is still coherent; KL divergence on benign prompts is reasonable.
+
+## Step 6: Evals
+- **Does:** Runs the ablated model on the held-out ImpossibleBench tasks (never used in step 4) and on a basic capability eval (MMLU via lm-eval-harness).
+- **Output:** Hack rates and capability scores, before vs after ablation.
+- **Check:** Compare against the unablated baseline.
+
+## Step 7: Repeat and compare
+- **Does:** Repeats steps 2–6 with different training data or benchmarks, then compares directions (e.g. cosine similarity per layer).
+- **Output:** Results across datasets; direction similarity.
+- **Check:** Results are consistent enough to interpret.
+
+## Later (after the minimal viable version)
+- Equally well-tuned DPO baseline on the same datasets.
+- Sample efficiency and data-quality comparisons.
+- Larger models.
+
 ## Conventions
 - **Never commit to git.** The user makes all commits. Leave changes in the working tree.
 - Each stage is a separate script; stages communicate only via files on disk.

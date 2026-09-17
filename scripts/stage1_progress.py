@@ -124,7 +124,11 @@ def report(run_dir: Path, base_url: str | None) -> bool:
         idle_min = (now - (last_ts or run_start)).total_seconds() / 60
         print(f"  last sample finished {idle_min:.0f} min ago" if last_ts else f"  waiting for the first sample to finish ({idle_min:.0f} min so far)")
         if stats and stats["gen_tok_s"] == 0 and stats["running"] == 0:
-            print("  WARNING: vLLM is idle while samples are unfinished. The run may have stopped or crashed.")
+            # A lone sample running its tests between attempts leaves vLLM idle for a few seconds.
+            time.sleep(20)
+            recheck = vllm_stats(base_url)
+            if recheck and recheck["gen_tok_s"] == 0 and recheck["running"] == 0:
+                print("  WARNING: vLLM has been idle for 30 s while samples are unfinished. The run may have stopped or crashed.")
         elif idle_min > STALL_MINUTES and not (stats and stats["gen_tok_s"] > 0):
             print(f"  WARNING: no sample finished in {STALL_MINUTES}+ min and vLLM activity could not be confirmed.")
     return finished

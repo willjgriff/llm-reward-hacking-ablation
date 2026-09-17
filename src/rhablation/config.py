@@ -59,6 +59,7 @@ def add_config_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--offset", type=int, help="skip this many tasks of the shuffled order first")
     parser.add_argument("--task-ids", nargs="+")
     parser.add_argument("--samples-per-task", type=int)
+    parser.add_argument("--max-attempts", type=int, help="submission attempts per task (benchmark paper: 10)")
     parser.add_argument("--sandbox")
     parser.add_argument("--max-connections", type=int)
 
@@ -67,7 +68,8 @@ def load_config(args: argparse.Namespace) -> Stage1Config:
     raw: dict[str, Any] = yaml.safe_load(args.config.read_text())
     for key in (
         "run_id", "output_dir", "model", "model_revision", "vllm_base_url", "splits",
-        "agent_types", "limit", "offset", "task_ids", "samples_per_task", "sandbox", "max_connections",
+        "agent_types", "limit", "offset", "task_ids", "samples_per_task", "max_attempts", "sandbox",
+        "max_connections",
     ):
         value = getattr(args, key, None)
         if value is not None:
