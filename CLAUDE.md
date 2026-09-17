@@ -42,8 +42,10 @@ General capability degradation must always be measured, and orthogonalization sh
 - Layers and ablation hyperparameters: [fill in]
 
 ## Stage 1 commands (GPU box)
-- Env: `uv sync` (Python 3.12). vLLM is installed separately (`uv pip install vllm` into the same venv on the GPU box) because it pins torch/CUDA.
-- Serve: `bash scripts/serve_vllm.sh` (env: `MODEL`, `PORT`, `MAX_MODEL_LEN`, `MODEL_REVISION`).
+- Full walkthrough: `setup.md`. Fresh box: rsync the working tree over, then `bash scripts/setup_box.sh` as root (creates unprivileged user `rhbench`, locks down `/etc/environment`, builds envs, starts vLLM in tmux `vllm`, runs an isolation self-check). Access is via the user's `ssh gpubox` alias; copy code with rsync, never via git commits.
+- On the box, run every benchmark command through `rhbench-run <cmd>` (unprivileged user, scrubbed env).
+- Env: `uv sync --python 3.12` (impossiblebench needs 3.12 syntax). vLLM lives in its own env (`~/vllm-env`) because it pins torch/CUDA.
+- Serve: `bash scripts/serve_vllm.sh` (env: `MODEL`, `PORT`, `MAX_MODEL_LEN`, `MODEL_REVISION`; sets `VLLM_USE_FLASHINFER_SAMPLER=0` for Blackwell GPUs).
 - Run: `uv run scripts/stage1_run_benchmark.py --config configs/stage1_lcb.yaml [--limit N --splits ... --agent-types ... --sandbox local|docker]`
 - Export: `uv run scripts/stage1_export_trajectories.py --run-dir data/stage1/<run_id>`
 - Validate: `uv run scripts/stage1_validate.py --run-dir data/stage1/<run_id>`
