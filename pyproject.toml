@@ -2,7 +2,8 @@
 name = "rhablation"
 version = "0.1.0"
 description = "Orthogonalization against reward hacking: benchmark harness and trajectory tooling"
-requires-python = ">=3.11,<3.13"
+# impossiblebench uses Python 3.12-only f-string syntax
+requires-python = ">=3.12,<3.13"
 dependencies = [
     "inspect-ai>=0.3.263",
     "impossiblebench @ git+https://github.com/safety-research/impossiblebench",

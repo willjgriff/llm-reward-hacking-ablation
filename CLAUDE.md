@@ -50,6 +50,7 @@ General capability degradation must always be measured, and orthogonalization sh
 - The benchmark's `local` sandbox runs model-written code on the host; only use it as an unprivileged user with no credentials.
 
 ## Conventions
+- **Never commit to git.** The user makes all commits. Leave changes in the working tree.
 - Each stage is a separate script; stages communicate only via files on disk.
 - Config via file or CLI args; no hardcoded paths, models, or dataset sizes.
 - Always run on a tiny subset (5–10 tasks) and show results before any full run.

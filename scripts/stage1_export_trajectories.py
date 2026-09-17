@@ -73,10 +73,28 @@ def convert_turn(index: int, ev: Any, tokenizer: Any) -> Turn:
     call = ev.call
     resp: dict[str, Any] | None = call.response if call is not None else None
     if not resp or not resp.get("choices"):
+        out_choice = ev.output.choices[0] if ev.output and ev.output.choices else None
+        if out_choice is not None and not ev.error:
+            # Inspect sometimes logs a completed model event without the raw call. Keep the parsed
+            # output (reasoning + content); token ids are unavailable for this turn.
+            text, reasoning = split_content(out_choice.message.content)
+            usage = ev.output.usage
+            return Turn(
+                turn_index=index,
+                reasoning=reasoning,
+                content=text,
+                tool_calls=convert_tool_calls(out_choice.message.tool_calls),
+                stop_reason=out_choice.stop_reason,
+                usage=TurnUsage(
+                    input_tokens=usage.input_tokens if usage else None,
+                    output_tokens=usage.output_tokens if usage else None,
+                    reasoning_tokens=usage.reasoning_tokens if usage else None,
+                ),
+            )
         return Turn(
             turn_index=index,
             error=ev.error or (resp.get("error") if isinstance(resp, dict) else None) or "no response",
-            stop_reason=ev.output.choices[0].stop_reason if ev.output and ev.output.choices else None,
+            stop_reason=out_choice.stop_reason if out_choice else None,
         )
     choice = resp["choices"][0]
     msg = choice.get("message") or {}
@@ -257,3 +275,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+    
