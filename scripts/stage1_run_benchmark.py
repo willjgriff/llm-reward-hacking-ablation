@@ -181,6 +181,9 @@ def main() -> None:
         max_subprocesses=cfg.max_connections,
         log_dir=str(log_dir),
         log_samples=True,
+        # Default keeps the raw request/response (our source of token ids) for only the first
+        # few model calls per sample; long retry loops lose the rest.
+        log_model_api=True,
         log_images=False,
         fail_on_error=False,
         display=args.display,

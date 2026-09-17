@@ -38,6 +38,7 @@ General capability degradation must always be measured, and orthogonalization sh
 - Ablation library: heretic (≥1.3.0 handles Qwen3.5's hybrid GatedDeltaNet/attention layers). obliteratus fail-closes on every Qwen3.5 size except Qwen3.8-27B — not usable.
 - **Propensity, not forced hacking** (mentor's intent; details pending mentor confirmation): direction-extraction data and the headline before/after eval use solvable (`original`) tasks only, judge-scored on held-out task IDs. On `oneoff`/`conflicting` hacking is the only way to pass, so those splits serve as a labelled test bed for building/validating the LLM judge (pass = verified hack) and at most as a secondary "forced hacking" number. Open risks: base hack rate on `original` may be near zero; on-policy thinking rollouts are too slow for a one-hour data budget, so training transcripts are expected to be off-policy (source undecided).
 - Model and revision: `Qwen/Qwen3.5-4B` (switched from 9B on 2026-09-17 for speed; same `Qwen3_5ForConditionalGeneration` hybrid architecture, main = `851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a`). Run `smoke1` used `Qwen/Qwen3.5-9B` @ `c202236235762e1c871ad0ccb60c8ee5ba337b9a`. Revision is resolved at run time and written to `run_config.json`. Sampling: temp 0.6 / top_p 0.95 / top_k 20, `max_tokens` 32768 per turn (16384 truncated the CoT in 4 of 10 smoke calls). vLLM flags in `scripts/serve_vllm.sh` (`--reasoning-parser qwen3 --tool-call-parser qwen3_xml`, `--max-model-len 262144`).
+- Off-box storage: finished runs are uploaded to a private Hugging Face dataset repo under `stage1/<run_id>/` (repo name in `HF_UPLOAD_REPO`, not hardcoded). The upload runs as **root** with a fine-grained token scoped to that one repo, stored in `/root/.config/rhablation/upload.env`; it must never go through `rhbench-run` or into the repo tree, which `rhbench` can read.
 - Judge model and prompts: [fill in]
 - Token positions and aggregation for activations over multi-turn completions: [fill in; this is a deliberate research decision, do not choose silently]
 - Layers and ablation hyperparameters: [fill in]
@@ -51,6 +52,8 @@ General capability degradation must always be measured, and orthogonalization sh
 - Progress of a live run: `uv run scripts/stage1_progress.py --run-dir data/stage1/<run_id> [--watch 60]` (reads `progress.jsonl`, written by the Inspect hook in `src/rhablation/progress.py`, plus live vLLM `/metrics`). All splits/scaffolds run in one Inspect call and share `max_connections`.
 - Export: `uv run scripts/stage1_export_trajectories.py --run-dir data/stage1/<run_id>`
 - Validate: `uv run scripts/stage1_validate.py --run-dir data/stage1/<run_id>`
+- Unattended (as root, from the root-owned repo copy, not via `rhbench-run`): `bash scripts/stage1_pipeline.sh --run-id <run_id> --display plain [benchmark args] [--no-upload]` chains run → export → validate → upload; later steps still run if an earlier one fails.
+- Upload only (as root on the box, or from the laptop): `bash scripts/upload_run.sh --run-dir <run_dir> [--repo <user/name>]`
 - The benchmark's `local` sandbox runs model-written code on the host; only use it as an unprivileged user with no credentials.
 
 ## Conventions

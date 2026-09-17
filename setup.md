@@ -31,7 +31,7 @@ From the repo root on your machine:
 
 `scripts/setup_box.sh` (idempotent; re-run it after a reboot) does all of the following:
 
-1. Checks GPU, free disk, and installs `uv`/`tmux`/`rsync` if missing.
+1. Checks GPU, free disk, and installs `uv`/`tmux`/`rsync` if missing. Enables tmux mouse scrolling and a 50k-line scrollback in root's `~/.tmux.conf` (hold Shift, or Option in macOS Terminal/iTerm, while dragging to select text natively).
 2. Picks the sandbox mode: Docker if `docker info` works, otherwise `local` (see "Isolation").
 3. Creates the unprivileged user `rhbench`, copies the repo to `/home/rhbench/llm-reward-hacking-ablation`.
 4. Locks down credentials: `chmod 700 /root /workspace <repo>`, `chmod 600 /etc/environment`.
@@ -87,6 +87,19 @@ verified hack), errors, samples per hour, a rough ETA, minutes since the last sa
 and live vLLM load (running/queued requests, generated tokens per second). All splits and
 scaffolds run in one Inspect call and share `max_connections`.
 
+Unattended run (start it in tmux and leave; your laptop can be off). As root, from the
+root-owned repo copy (`/workspace/...`, not `/home/rhbench/...`), one command runs the
+benchmark, exports, validates and uploads the run directory (see "Off-box storage"):
+
+```bash
+bash scripts/stage1_pipeline.sh --run-id lcb-4b-part1 --offset 0 --limit 34 --sandbox local --display plain
+```
+
+It takes the same arguments as `stage1_run_benchmark.py`, plus `--no-upload`. A failing step
+does not stop the later ones, so a crashed run is still uploaded; the step summary and exit
+code say what failed. The full output is in `/tmp/stage1_<run_id>.log` and is uploaded as
+`pipeline.log`.
+
 Run the dataset in chunks without overlap (same shuffled order every time), e.g. the first
 third now and the rest later:
 
@@ -116,12 +129,51 @@ output, `programmatic_hack` (true/false on impossible variants, null on `origina
 - Validate exits 1 on any schema violation; prints counts per status, pass/hack rate per
 (variant, scaffold), integrity warnings, and one example (`--example-id`, `--full`).
 
-Copy results back to your machine:
+Copy results back to your machine, either straight from the box or from the Hugging Face
+dataset repo (works after the box is gone):
 
 ```bash
 rsync -a gpubox:/home/rhbench/llm-reward-hacking-ablation/data/stage1/<run_id> data/stage1/
+# or, with HF_TOKEN set (e.g. `set -a; . ~/.config/rhablation/upload.env; set +a`):
+uvx --from huggingface_hub hf download <user>/<repo> --repo-type dataset --include "stage1/<run_id>/*" --local-dir data/
 uv run inspect view --log-dir data/stage1/<run_id>/logs     # browse the raw Inspect logs
 ```
+
+## Off-box storage (private Hugging Face dataset)
+
+The box cannot push to your laptop, and its disk is gone once the instance is destroyed, so
+finished runs are uploaded to a private HF dataset repo under `stage1/<run_id>/`.
+
+One-time, on huggingface.co:
+
+1. Create a **private dataset** repo, e.g. `<user>/rhablation-runs`.
+2. Create a **fine-grained token** whose only permission is write access to that repo. A rented
+   box is not a place for an account-wide token.
+3. On your laptop, outside the repo (the set-up rsync would copy a repo-level `.env` into the
+   tree that `rhbench` can read):
+
+   ```bash
+   mkdir -p ~/.config/rhablation && chmod 700 ~/.config/rhablation
+   printf 'HF_TOKEN=hf_...\nHF_UPLOAD_REPO=<user>/rhablation-runs\n' > ~/.config/rhablation/upload.env
+   chmod 600 ~/.config/rhablation/upload.env
+   ```
+
+On every new box, after `setup_box.sh`:
+
+```bash
+ssh gpubox 'install -d -m 700 /root/.config/rhablation'
+scp ~/.config/rhablation/upload.env gpubox:/root/.config/rhablation/upload.env
+ssh gpubox 'chmod 600 /root/.config/rhablation/upload.env'
+```
+
+The token lives under `/root` (mode 700, covered by the isolation self-check), and the upload
+runs as root, never through `rhbench-run`. Upload a run by hand (also works from the laptop):
+
+```bash
+bash scripts/upload_run.sh --run-dir /home/rhbench/llm-reward-hacking-ablation/data/stage1/<run_id>
+```
+
+It refuses to upload a run directory that contains symlinks.
 
 
 

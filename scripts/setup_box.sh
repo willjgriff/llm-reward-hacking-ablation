@@ -43,6 +43,13 @@ uv --version
 for tool in tmux rsync curl; do
   command -v "$tool" >/dev/null || { apt-get update -qq && apt-get install -y -qq "$tool"; }
 done
+# Scroll wheel scrolls pane history, and long vLLM/benchmark output stays in scrollback.
+TMUX_CONF="$HOME/.tmux.conf"
+if ! grep -qs '# rhablation: scrolling' "$TMUX_CONF"; then
+  printf '%s\n' '# rhablation: scrolling' 'set -g mouse on' 'set -g history-limit 50000' >> "$TMUX_CONF"
+fi
+# The config is only read at server start; SSH logins are usually already inside tmux.
+tmux source-file "$TMUX_CONF" 2>/dev/null || true
 
 step "Sandbox mode"
 if docker info >/dev/null 2>&1; then
@@ -134,5 +141,9 @@ Then:
   rhbench-run uv run scripts/stage1_export_trajectories.py --run-dir data/stage1/<run_id>
   rhbench-run uv run scripts/stage1_validate.py --run-dir data/stage1/<run_id>
 Outputs: $BENCH_REPO/data/stage1/<run_id>/
+Unattended run with upload to the HF dataset repo (as root, in tmux):
+  bash scripts/stage1_pipeline.sh --run-id <run_id> --sandbox $SANDBOX --display plain [--limit N ...]
 After a reboot: re-run this script (it restarts vLLM and re-applies the lock-down).
 EOF
+UPLOAD_ENV="${RHABLATION_UPLOAD_ENV:-$HOME/.config/rhablation/upload.env}"
+[ -f "$UPLOAD_ENV" ] || echo "NOTE: no upload config at $UPLOAD_ENV; stage1_pipeline.sh cannot upload until you add it (setup.md 'Off-box storage')."
