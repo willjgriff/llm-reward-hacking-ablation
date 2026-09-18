@@ -69,6 +69,28 @@ def timeout_warnings(records: list[Trajectory]) -> list[str]:
     ]
 
 
+def thinking_budget_summary(records: list[Trajectory]) -> str | None:
+    """How many model calls had their chain of thought cut by vLLM's thinking_token_budget.
+
+    Those turns' stored reasoning ends mid-thought by design (the model still answered)."""
+    calls = capped = 0
+    budgets = set()
+    for r in records:
+        budget = (r.sampling.extra_body or {}).get("thinking_token_budget")
+        if budget is None:
+            continue
+        budgets.add(budget)
+        for t in r.turns:
+            if t.error or t.usage.reasoning_tokens is None:
+                continue
+            calls += 1
+            # vLLM reports budget - 1 for a cut call (the forced </think> takes the last slot).
+            capped += t.usage.reasoning_tokens >= budget - 1
+    if not budgets:
+        return None
+    return f"thinking_token_budget={sorted(budgets)}: {capped} of {calls} model calls had their reasoning cut at the budget ({capped / calls:.0%})" if calls else None
+
+
 def summarize(records: list[Trajectory]) -> None:
     print("\n== status ==")
     for status, n in sorted(Counter(r.status for r in records).items()):
@@ -136,6 +158,9 @@ def main() -> None:
 
     warnings = timeout_warnings(records) + integrity_warnings(records, tokenizer)
     summarize(records)
+    budget_line = thinking_budget_summary(records)
+    if budget_line:
+        print(f"\n== thinking budget ==\n  {budget_line}")
     print(f"\n== integrity warnings: {len(warnings)} ==")
     for w in warnings[:50]:
         print(f"  WARN {w}")

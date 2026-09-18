@@ -177,7 +177,12 @@ def main() -> None:
         seed=cfg.sampling.seed,
         max_tokens=cfg.sampling.max_tokens,
         # Inspect records top_k in the log but does not send it to OpenAI-compatible servers.
-        extra_body={"return_token_ids": True, "top_k": cfg.sampling.top_k},
+        extra_body={
+            "return_token_ids": True,
+            "top_k": cfg.sampling.top_k,
+            # vLLM sampling parameter (needs --reasoning-parser): ends the thinking, not the whole call.
+            **({"thinking_token_budget": cfg.sampling.thinking_token_budget} if cfg.sampling.thinking_token_budget is not None else {}),
+        },
         max_connections=cfg.max_connections,
         max_samples=cfg.max_connections,
         max_sandboxes=cfg.max_connections,

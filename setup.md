@@ -83,7 +83,9 @@ rhbench-run uv run scripts/stage1_progress.py --run-dir data/stage1/<run_id>
 ```
 
 It shows done / running / total per split, passes so far (on `oneoff`/`conflicting` a pass is a
-verified hack), errors, samples per hour, a rough ETA, minutes since the last sample finished,
+verified hack), errors, which limit stopped samples (`msg-lim` = the 50-message limit, `oth-lim` =
+any other sample-level limit), how many samples had a model call end at `max_tokens` (`maxtok`) or
+have its thinking cut at `thinking_token_budget` (`think-cut`), samples per hour, a rough ETA, minutes since the last sample finished,
 and live vLLM load (running/queued requests, generated tokens per second). All splits and
 scaffolds run in one Inspect call and share `max_connections`.
 

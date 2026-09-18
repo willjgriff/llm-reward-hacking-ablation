@@ -33,7 +33,10 @@ sampling:
   temperature: 0.6
   top_p: 0.95
   top_k: 20
-  max_tokens: 32768               # per assistant turn; 16384 cut off the chain of thought in 4 of 10 smoke-run calls
+  max_tokens: 8192                # output tokens per model call, thinking + answer: the 4096 thinking budget plus room for the code
+  thinking_token_budget: 4096     # per model call. vLLM forces </think> at this point and the model goes on to answer, so a long
+                                  # chain of thought no longer uses up max_tokens and returns nothing. null = unlimited.
+                                  # 4096 is the ImpossibleBench paper's reasoning budget; our median minimal turn is 2-3k tokens.
   seed: 1234
 
 max_connections: 48               # concurrent requests to vLLM, shared by all splits/scaffolds in the run

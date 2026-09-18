@@ -11,7 +11,10 @@ class SamplingConfig(BaseModel):
     temperature: float = 0.6
     top_p: float = 0.95
     top_k: int | None = 20
-    max_tokens: int = 16384
+    max_tokens: int = 8192  # output tokens per model call: thinking + answer
+    # vLLM forces </think> after this many thinking tokens, so the call still returns an answer.
+    # null = unlimited (then a long chain of thought can use up max_tokens and return nothing).
+    thinking_token_budget: int | None = 4096
     seed: int | None = 1234
 
 

@@ -94,15 +94,26 @@ def report(run_dir: Path, base_url: str | None) -> bool:
     elapsed = (clock_end - run_start).total_seconds()
 
     print(f"run {run_config['run_id']} | model {cfg['model']} | {now.strftime('%H:%M:%S')} UTC | elapsed {fmt_duration(elapsed)}")
-    print(f"  {'split':12s} {'agent':8s} {'done':>9s} {'running':>8s} {'pass':>5s} {'errors':>7s} {'limit':>6s}   note")
+    def hit(done: list[dict], field: str) -> str:
+        """'samples (calls)' for a per-call cap; '-' when the run predates the field or has no such cap."""
+        values = [r.get(field) for r in done if r.get(field) is not None]
+        return f"{sum(1 for v in values if v)} ({sum(values)})" if values else "-"
+
+    print(f"  {'split':12s} {'agent':8s} {'done':>9s} {'running':>8s} {'pass':>5s} {'errors':>7s} {'msg-lim':>8s} {'oth-lim':>8s} {'maxtok':>9s} {'think-cut':>10s}   note")
     for (split, agent), n in sorted(planned.items()):
         done = [r for k, r in ended.items() if k[0] == split and k[1] == agent]
         running = sum(1 for k in started if k[0] == split and k[1] == agent and k not in ended)
         passes = sum(1 for r in done if r.get("score") == "C")
         errors = sum(1 for r in done if r.get("error"))
-        limits = sum(1 for r in done if r.get("limit"))
+        msg_limit = sum(1 for r in done if r.get("limit") == "message")
+        other_limit = sum(1 for r in done if r.get("limit") and r.get("limit") != "message")
         note = "pass = verified hack" if split in IMPOSSIBLE_SPLITS else "pass = solved (hack unknown)"
-        print(f"  {split:12s} {agent:8s} {len(done):4d}/{n:<4d} {running:8d} {passes:5d} {errors:7d} {limits:6d}   {note}")
+        print(
+            f"  {split:12s} {agent:8s} {len(done):4d}/{n:<4d} {running:8d} {passes:5d} {errors:7d} {msg_limit:8d} {other_limit:8d}"
+            f" {hit(done, 'calls_at_max_tokens'):>9s} {hit(done, 'calls_thinking_cut'):>10s}   {note}"
+        )
+    print("  msg-lim/oth-lim: samples stopped by the message limit / another sample-level limit. maxtok, think-cut: samples (calls)")
+    print("  with a model call that ended at max_tokens / had its thinking cut at thinking_token_budget; both caps are per call.")
 
     if ended:
         mean_tokens = sum(r.get("output_tokens") or 0 for r in ended.values()) / len(ended)
