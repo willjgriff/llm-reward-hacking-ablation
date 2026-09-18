@@ -100,6 +100,23 @@ does not stop the later ones, so a crashed run is still uploaded; the step summa
 code say what failed. The full output is in `/tmp/stage1_<run_id>.log` and is uploaded as
 `pipeline.log`.
 
+**Auto-stop.** After a successful upload the pipeline hands over to
+`scripts/stop_box_when_idle.sh`, which stops the box to end GPU charges once it has been idle
+for 30 minutes in a row (`--idle-minutes N` to change, `--no-stop` to disable). Idle means all of:
+no inbound SSH connection (your terminal, VS Code, Claude Code, an rsync/scp pull), no
+benchmark/export/upload/copy process, and no vLLM requests in flight. While you stay connected it
+keeps waiting, and stops 30 minutes after you leave.
+
+- Keep the box up: `touch /tmp/rhablation-no-stop` (remove the file before the next run), or kill
+  the tmux session. Status lines go to the terminal and `/tmp/stop_box_when_idle.log`.
+- If the upload failed, or with `--no-upload`, the box is **not** stopped: the only copy of the
+  run would be on its disk.
+- It is a Vast "stop", not "destroy": the disk is kept and storage is still billed. Restarting
+  can be delayed if someone else rents the GPU meanwhile. After a restart follow "Stopping and
+  restarting the box" below.
+- It uses the instance-scoped `CONTAINER_API_KEY` that Vast puts in `/etc/environment` (root-only
+  after set-up); the pipeline checks at start that this works, so it fails early elsewhere.
+
 Run the dataset in chunks without overlap (same shuffled order every time), e.g. the first
 third now and the rest later:
 

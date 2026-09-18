@@ -143,6 +143,8 @@ Then:
 Outputs: $BENCH_REPO/data/stage1/<run_id>/
 Unattended run with upload to the HF dataset repo (as root, in tmux):
   bash scripts/stage1_pipeline.sh --run-id <run_id> --sandbox $SANDBOX --display plain [--limit N ...]
+  It stops this box after the upload once it is idle with nobody connected for 30 minutes
+  (--no-stop to disable; touch /tmp/rhablation-no-stop to cancel a pending stop).
 After a reboot: re-run this script (it restarts vLLM and re-applies the lock-down).
 EOF
 UPLOAD_ENV="${RHABLATION_UPLOAD_ENV:-$HOME/.config/rhablation/upload.env}"

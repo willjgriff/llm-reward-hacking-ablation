@@ -152,7 +152,7 @@ def main() -> None:
     }
     run_config_path = run_dir / "run_config.json"
     run_config_path.write_text(json.dumps(run_config, indent=2))
-    print(f"run_id={run_id} model_revision={model_revision} vllm={vllm_version}")
+    print(f"run_id={run_id} model_revision={model_revision} vllm={vllm_version} client_timeout_s={cfg.client_timeout_s}")
 
     os.environ["RHABLATION_PROGRESS_FILE"] = str((run_dir / "progress.jsonl").resolve())
     import rhablation.progress  # noqa: F401  (registers the Inspect progress hook)
@@ -166,6 +166,9 @@ def main() -> None:
         max_tasks=len(tasks),
         model=f"vllm/{cfg.model}",
         model_base_url=cfg.vllm_base_url,
+        # Without this the OpenAI SDK gives up on a model call after 600 s (x3 tries), so a turn
+        # with a long chain of thought costs 30 minutes and is then resampled.
+        model_args={"client_timeout": cfg.client_timeout_s},
         sample_id=run_task_ids,
         epochs=cfg.samples_per_task,
         temperature=cfg.sampling.temperature,

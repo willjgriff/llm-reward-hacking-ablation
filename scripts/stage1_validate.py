@@ -56,6 +56,19 @@ def integrity_warnings(records: list[Trajectory], tokenizer) -> list[str]:
     return warnings
 
 
+def timeout_warnings(records: list[Trajectory]) -> list[str]:
+    """Model calls the HTTP client abandoned. Each one was resampled, so long generations are under-represented."""
+    timed_out = [(r, t) for r in records for t in r.turns if t.error and "timed out" in t.error.lower()]
+    if not timed_out:
+        return []
+    n_calls = sum(len(r.turns) for r in records)
+    n_traj = len({r.trajectory_id for r, _ in timed_out})
+    return [
+        f"{len(timed_out)} of {n_calls} model calls timed out in {n_traj} of {len(records)} trajectories: "
+        "raise client_timeout_s; these turns were resampled, which biases the data toward short chains of thought"
+    ]
+
+
 def summarize(records: list[Trajectory]) -> None:
     print("\n== status ==")
     for status, n in sorted(Counter(r.status for r in records).items()):
@@ -65,17 +78,20 @@ def summarize(records: list[Trajectory]) -> None:
     for r in records:
         groups[(r.variant, r.agent_type)].append(r)
     print("\n== per (variant, agent_type) ==")
-    print(f"  {'variant':12s} {'agent':8s} {'n':>3s} {'scored':>6s} {'pass':>6s} {'hack':>6s} {'turns':>6s} {'out_tok':>8s} {'errors':>6s}")
+    print(f"  {'variant':12s} {'agent':8s} {'n':>3s} {'scored':>6s} {'pass':>6s} {'hack':>6s} {'tedit':>6s} {'turns':>6s} {'out_tok':>8s} {'errors':>6s}")
+    print("  (hack = pass on an impossible variant, the benchmark's label; tedit = test.py edit attempts, tools only, never a pass)")
     for (variant, agent), rs in sorted(groups.items()):
         scored = [r for r in rs if r.score is not None]
         passed = sum(1 for r in scored if r.score.value == "C")
         hacks = [r.programmatic_hack for r in rs if r.programmatic_hack is not None]
         hack_rate = f"{sum(hacks) / len(hacks):.2f}" if hacks else "n/a"
         pass_rate = f"{passed / len(scored):.2f}" if scored else "n/a"
+        edits = [r.test_edit_attempt for r in rs if r.test_edit_attempt is not None]
+        edit_rate = f"{sum(edits) / len(edits):.2f}" if edits else "n/a"
         mean_turns = sum(r.n_turns for r in rs) / len(rs)
         mean_out = sum(r.token_counts.output_tokens for r in rs) / len(rs)
         errors = sum(1 for r in rs if r.status == "error")
-        print(f"  {variant:12s} {agent:8s} {len(rs):3d} {len(scored):6d} {pass_rate:>6s} {hack_rate:>6s} {mean_turns:6.1f} {mean_out:8.0f} {errors:6d}")
+        print(f"  {variant:12s} {agent:8s} {len(rs):3d} {len(scored):6d} {pass_rate:>6s} {hack_rate:>6s} {edit_rate:>6s} {mean_turns:6.1f} {mean_out:8.0f} {errors:6d}")
 
 
 def print_example(r: Trajectory, full: bool) -> None:
@@ -118,7 +134,7 @@ def main() -> None:
 
         tokenizer = AutoTokenizer.from_pretrained(records[0].model, revision=records[0].model_revision)
 
-    warnings = integrity_warnings(records, tokenizer)
+    warnings = timeout_warnings(records) + integrity_warnings(records, tokenizer)
     summarize(records)
     print(f"\n== integrity warnings: {len(warnings)} ==")
     for w in warnings[:50]:

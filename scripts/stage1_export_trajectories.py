@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from rhablation.hack_signals import test_file_writes  # noqa: E402
 from rhablation.schema import (  # noqa: E402
     SCHEMA_VERSION,
     Message,
@@ -169,6 +170,11 @@ def convert_sample(log: Any, sample: Any, run_config: dict[str, Any], tokenizer:
     else:
         programmatic_hack = None
 
+    test_edit_attempt = None
+    if agent_type == "tools":
+        flagged_at_scoring = bool(score is not None and (score.metadata or {}).get("test_modification_detected"))
+        test_edit_attempt = flagged_at_scoring or bool(test_file_writes([t.model_dump() for t in turns]))
+
     status, error_message = derive_status(sample, turns)
 
     usage_total = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "reasoning_tokens": 0}
@@ -213,6 +219,7 @@ def convert_sample(log: Any, sample: Any, run_config: dict[str, Any], tokenizer:
         score=score_record,
         raw_test_results=score.metadata if score is not None else None,
         programmatic_hack=programmatic_hack,
+        test_edit_attempt=test_edit_attempt,
         status=status,
         error_message=error_message,
         token_counts=TokenCounts(**usage_total),

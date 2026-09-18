@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Unattended stage 1 on the GPU box: benchmark -> export -> validate -> upload to the HF dataset repo.
 # Run as root from the root-owned copy of the repo (not the one under /home/rhbench), inside tmux:
-#   bash scripts/stage1_pipeline.sh --run-id lcb-4b-part1 --display plain [stage1_run_benchmark.py args] [--no-upload]
+#   bash scripts/stage1_pipeline.sh --run-id lcb-4b-part1 --display plain [stage1_run_benchmark.py args] [--no-upload] [--no-stop] [--idle-minutes 30]
 # A failing step does not stop the later ones, so a crashed or partly invalid run is still uploaded.
+# After a successful upload it hands over to stop_box_when_idle.sh, which stops the box (disk kept)
+# once nobody is connected and nothing is running for --idle-minutes in a row.
 set -uo pipefail
 
 die() { echo "ERROR: $*" >&2; exit 1; }
@@ -19,17 +21,22 @@ command -v rhbench-run >/dev/null || die "rhbench-run not found; run scripts/set
 case "$REPO_DIR" in "$BENCH_HOME"/*) die "run this from the root-owned repo copy, not from $BENCH_HOME" ;; esac
 
 UPLOAD=1
+STOP=1
+IDLE_MINUTES=30
 RUN_ID=""
 OUTPUT_DIR="data/stage1"
 BENCH_ARGS=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --no-upload) UPLOAD=0; shift ;;
+    --no-stop) STOP=0; shift ;;
+    --idle-minutes) IDLE_MINUTES="${2:-}"; shift 2 ;;
+    --idle-minutes=*) IDLE_MINUTES="${1#*=}"; shift ;;
     --run-id) RUN_ID="${2:-}"; shift 2 ;;
     --run-id=*) RUN_ID="${1#*=}"; shift ;;
     --output-dir) OUTPUT_DIR="${2:-}"; shift 2 ;;
     --output-dir=*) OUTPUT_DIR="${1#*=}"; shift ;;
-    -h|--help) sed -n '2,5p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,7p' "$0"; exit 0 ;;
     *) BENCH_ARGS+=("$1"); shift ;;
   esac
 done
@@ -43,11 +50,16 @@ if [ "$UPLOAD" = 1 ]; then
   grep -q '^HF_TOKEN=' "$UPLOAD_ENV" && grep -q '^HF_UPLOAD_REPO=' "$UPLOAD_ENV" \
     || die "$UPLOAD_ENV must define HF_TOKEN and HF_UPLOAD_REPO"
 fi
+if [ "$STOP" = 1 ]; then
+  bash "$REPO_DIR/scripts/stop_box_when_idle.sh" --check --idle-minutes "$IDLE_MINUTES" \
+    || die "the box cannot stop itself; fix that or pass --no-stop"
+fi
 
 LOG="/tmp/stage1_$RUN_ID.log"
 : > "$LOG"
 RESULTS=()
 FAILED=0
+UPLOADED=0
 run_step() {
   local name="$1"; shift
   printf '\n== %s (%s)\n' "$name" "$(date -u +%H:%M:%SZ)" | tee -a "$LOG"
@@ -66,11 +78,22 @@ if [ -d "$RUN_DIR" ]; then
   if [ "$UPLOAD" = 1 ]; then
     cp --remove-destination "$LOG" "$RUN_DIR/pipeline.log"  # never write through a planted symlink
     run_step upload bash "$REPO_DIR/scripts/upload_run.sh" --run-dir "$RUN_DIR"
+    case "${RESULTS[${#RESULTS[@]}-1]}" in ok*) UPLOADED=1 ;; esac
   fi
 else
   echo "benchmark did not create $RUN_DIR; nothing to export or upload" | tee -a "$LOG"
 fi
 
-printf '\n== Summary for run %s (log: %s)\n' "$RUN_ID" "$LOG"
-printf '%s\n' "${RESULTS[@]}"
+{
+  printf '\n== Summary for run %s (log: %s)\n' "$RUN_ID" "$LOG"
+  printf '%s\n' "${RESULTS[@]}"
+} | tee -a "$LOG"
+
+if [ "$STOP" = 1 ]; then
+  if [ "$UPLOADED" = 1 ]; then
+    exec bash "$REPO_DIR/scripts/stop_box_when_idle.sh" --idle-minutes "$IDLE_MINUTES"
+  fi
+  # A stopped box cannot always be restarted at once (the GPU may get rented out meanwhile).
+  echo "NOT stopping the box: the run was not uploaded, so its only copy is on this disk." | tee -a "$LOG"
+fi
 exit "$FAILED"

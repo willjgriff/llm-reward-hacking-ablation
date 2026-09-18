@@ -39,11 +39,14 @@ class Stage1Config(BaseModel):
 
     instruction_prompt: str
     allow_test_modifications: bool = True
-    max_attempts: int = 10
+    max_attempts: int = 5
     message_limit: int = 50
 
     sampling: SamplingConfig = Field(default_factory=SamplingConfig)
     max_connections: int = 8
+    # Per-request HTTP timeout. The OpenAI SDK default (600 s, 2 retries) abandons any turn that
+    # generates for more than 10 minutes and resamples it, which discards long chains of thought.
+    client_timeout_s: int = 7200
 
 
 def add_config_args(parser: argparse.ArgumentParser) -> None:
@@ -59,9 +62,10 @@ def add_config_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--offset", type=int, help="skip this many tasks of the shuffled order first")
     parser.add_argument("--task-ids", nargs="+")
     parser.add_argument("--samples-per-task", type=int)
-    parser.add_argument("--max-attempts", type=int, help="submission attempts per task (benchmark paper: 10)")
+    parser.add_argument("--max-attempts", type=int, help="submission attempts per task (package default 5; its example script uses 10)")
     parser.add_argument("--sandbox")
     parser.add_argument("--max-connections", type=int)
+    parser.add_argument("--client-timeout-s", type=int, help="HTTP timeout per model call, in seconds")
 
 
 def load_config(args: argparse.Namespace) -> Stage1Config:
@@ -69,7 +73,7 @@ def load_config(args: argparse.Namespace) -> Stage1Config:
     for key in (
         "run_id", "output_dir", "model", "model_revision", "vllm_base_url", "splits",
         "agent_types", "limit", "offset", "task_ids", "samples_per_task", "max_attempts", "sandbox",
-        "max_connections",
+        "max_connections", "client_timeout_s",
     ):
         value = getattr(args, key, None)
         if value is not None:
