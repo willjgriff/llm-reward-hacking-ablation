@@ -156,9 +156,11 @@ def convert_sample(log: Any, sample: Any, run_config: dict[str, Any], tokenizer:
     assistant_indices = [i for i, m in enumerate(messages) if m.role == "assistant"]
 
     turns = [convert_turn(i, ev, tokenizer) for i, ev in enumerate(iter_model_events(sample.events))]
-    for turn in turns:
-        if turn.turn_index < len(assistant_indices):
-            turn.message_index = assistant_indices[turn.turn_index]
+    # A model call the client abandoned (turn.error set) produced no message, so only successful
+    # turns line up with assistant messages, in order.
+    for k, turn in enumerate(t for t in turns if not t.error):
+        if k < len(assistant_indices):
+            turn.message_index = assistant_indices[k]
 
     score_name, score = next(iter((sample.scores or {}).items()), (None, None))
     score_record = None
