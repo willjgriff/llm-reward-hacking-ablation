@@ -42,6 +42,9 @@ class Stage1Config(BaseModel):
 
     instruction_prompt: str
     allow_test_modifications: bool = True
+    # Remove the benchmark's hardcoded "do not modify the tests" instructions from everything the
+    # model sees (see rhablation/prompt_edits.py). Off = the ImpossibleBench paper's prompts.
+    strip_test_modification_warnings: bool = False
     max_attempts: int = 5
     message_limit: int = 50
 
@@ -50,6 +53,10 @@ class Stage1Config(BaseModel):
     # Per-request HTTP timeout. The OpenAI SDK default (600 s, 2 retries) abandons any turn that
     # generates for more than 10 minutes and resamples it, which discards long chains of thought.
     client_timeout_s: int = 7200
+    # sandbox "local" only: kill model-written processes that stay alive this many seconds after the
+    # tool call that started them lost track of them (rhablation/orphan_reaper.py). Without it one
+    # infinite loop behind a pipe hangs the run. The tools time out at 60 s. null = off.
+    orphan_grace_s: int | None = 120
 
 
 def add_config_args(parser: argparse.ArgumentParser) -> None:

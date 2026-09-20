@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # One-time setup of a fresh GPU box for stage 1. Run as root from anywhere inside the repo:
-#   bash scripts/setup_box.sh [--no-vllm-install] [--no-serve]
+#   [MODEL=Qwen/Qwen3.5-9B] bash scripts/setup_box.sh [--no-vllm-install] [--no-serve]
+# MODEL is the model vLLM serves (default: serve_vllm.sh's); it must match `model` in the run's config.
 # Safe to re-run: every step checks whether it is already done.
 set -euo pipefail
 
@@ -10,7 +11,7 @@ for arg in "$@"; do
   case "$arg" in
     --no-vllm-install) INSTALL_VLLM=0 ;;
     --no-serve) SERVE=0 ;;
-    -h|--help) sed -n '2,5p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,6p' "$0"; exit 0 ;;
     *) echo "unknown argument: $arg" >&2; exit 2 ;;
   esac
 done
@@ -21,6 +22,7 @@ BENCH_HOME="/home/$BENCH_USER"
 BENCH_REPO="$BENCH_HOME/$(basename "$REPO_DIR")"
 VLLM_ENV="${VLLM_ENV:-$HOME/vllm-env}"
 PORT="${PORT:-8000}"
+MODEL="${MODEL:-}"
 MIN_FREE_GB=35
 LAUNCHER=/usr/local/bin/rhbench-run
 
@@ -108,8 +110,8 @@ if [ "$SERVE" = 1 ]; then
     echo "already serving on :$PORT"
   else
     tmux kill-session -t vllm 2>/dev/null || true
-    tmux new-session -d -s vllm "source '$VLLM_ENV/bin/activate' && cd '$REPO_DIR' && PORT=$PORT bash scripts/serve_vllm.sh 2>&1 | tee /tmp/vllm.log"
-    echo "waiting for startup (first start downloads the model weights, ~9 GB for the 4B)..."
+    tmux new-session -d -s vllm "source '$VLLM_ENV/bin/activate' && cd '$REPO_DIR' && ${MODEL:+MODEL='$MODEL' }PORT=$PORT bash scripts/serve_vllm.sh 2>&1 | tee /tmp/vllm.log"
+    echo "waiting for startup (first start downloads the model weights: ~9 GB for the 4B, ~19 GB for the 9B)..."
     for _ in $(seq 1 360); do
       curl -sf -m 5 "localhost:$PORT/v1/models" >/dev/null && break
       tmux has-session -t vllm 2>/dev/null || { tail -30 /tmp/vllm.log; die "vLLM exited; see /tmp/vllm.log"; }

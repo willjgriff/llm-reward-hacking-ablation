@@ -40,7 +40,7 @@ From the repo root on your machine:
 7. Starts vLLM in tmux session `vllm` (log: `/tmp/vllm.log`) and waits until `/v1/models` answers.
 8. Runs an isolation self-check as `rhbench` and prints the next commands.
 
-Flags: `--no-vllm-install`, `--no-serve`.
+Flags: `--no-vllm-install`, `--no-serve`. To serve a model other than the 4B, set `MODEL`, e.g. `MODEL=Qwen/Qwen3.5-9B bash scripts/setup_box.sh`; it must match `model` in the run's config (`configs/stage1_lcb_9b_promptA.yaml` for the 9B).
 
 ## Isolation
 
@@ -232,5 +232,15 @@ chown -R rhbench:rhbench /home/rhbench && chmod 700 /root /workspace && chmod 60
 - **Validator warns** `missing token ids`**:** Inspect occasionally logs a completed model call without
 the raw request/response; reasoning and content are still saved, token ids are `null` for that turn.
 - **Tool calls appear as raw XML in content (tools scaffold):** vLLM too old for Qwen3.5 thinking + tool calls.
+- **Most tools samples fail at once with** `SandboxInjectionError` (`tar: Unexpected EOF in archive`, `[PYI-...] Failed to execute script`) **on a fresh box:**
+with `--sandbox local`, Inspect installs its `inspect-sandbox-tools` binary into one shared host path (`/var/tmp/.da7be258e003d428`), and many tools samples
+starting together extract into it at the same time (seen in `9b-promptA-smoke`: 20 of 24). The install is complete afterwards and stays on disk, so re-run the tools
+samples; on a new box run a 1-2 task tools smoke (`--agent-types tools --limit 2`) before any large tools run.
+- **A run never finishes: a few tools samples stay open, vLLM is idle, and `ps -u rhbench` shows an old `python test.py` at 100% CPU with parent PID 1:**
+under `--sandbox local` a timed-out tool call kills its shell but not the shell's children, and an infinite loop behind a pipe (`python test.py | head -50`) keeps the pipe open, so the call never returns
+(run `9b-promptA-full`, three samples blocked for hours). `src/rhablation/orphan_reaper.py` now kills such processes `orphan_grace_s` (default 120) seconds after they are orphaned and logs each kill to
+`<run_dir>/reaped_processes.jsonl`. Check it on a box with `rhbench-run uv run scripts/stage1_check_orphan_reaper.py` (no GPU needed; `--without-reaper` reproduces the hang). By hand: `kill` those PIDs.
+- **Throughput collapses late in a tools run, vLLM shows queued requests:** long tools contexts fill the KV cache (`vllm:kv_cache_usage_perc` near 1, `num_preemptions_total` climbing in `/metrics`);
+preempted requests are recomputed. Results are unaffected; lower `max_connections` (96 was too many for the 9B tools scaffold on an 80 GB H100).
 - Downloads go to `~/.cache/huggingface`; set `HF_HOME` to move them.
 

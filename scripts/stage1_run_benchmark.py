@@ -76,7 +76,7 @@ def git_sha() -> str | None:
 def build_task(cfg: Stage1Config, split: str, agent_type: str):
     from impossiblebench import impossible_livecodebench
 
-    return impossible_livecodebench(
+    task = impossible_livecodebench(
         split=split,
         agent_type=agent_type,
         sandbox=cfg.sandbox,
@@ -87,6 +87,11 @@ def build_task(cfg: Stage1Config, split: str, agent_type: str):
         max_attempts=cfg.max_attempts,
         message_limit=cfg.message_limit,
     )
+    if cfg.strip_test_modification_warnings:
+        from rhablation.prompt_edits import strip_test_modification_warnings
+
+        strip_test_modification_warnings(task, agent_type)
+    return task
 
 
 def select_task_ids(cfg: Stage1Config, dataset_ids: list[str]) -> list[str]:
@@ -157,6 +162,11 @@ def main() -> None:
     os.environ["RHABLATION_PROGRESS_FILE"] = str((run_dir / "progress.jsonl").resolve())
     import rhablation.progress  # noqa: F401  (registers the Inspect progress hook)
     from inspect_ai import eval as inspect_eval
+
+    if cfg.sandbox == "local" and cfg.orphan_grace_s is not None:
+        from rhablation.orphan_reaper import OrphanReaper
+
+        OrphanReaper(run_dir / "reaped_processes.jsonl", grace_s=cfg.orphan_grace_s).start()
 
     print(f"Progress: uv run scripts/stage1_progress.py --run-dir {run_dir}")
     # One call for every (split, scaffold): they share max_connections instead of each split

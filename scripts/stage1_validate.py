@@ -1,7 +1,8 @@
 #!/usr/bin/env python
 """Stage 1: validate trajectories.jsonl against the schema and print a summary.
 
-Schema violations fail (exit 1). Chain-of-thought / token integrity checks are warnings.
+Schema violations fail (exit 1), as does a "do not modify the tests" instruction surviving in a
+run with strip_test_modification_warnings on. Chain-of-thought / token integrity checks are warnings.
 """
 
 import argparse
@@ -67,6 +68,23 @@ def timeout_warnings(records: list[Trajectory]) -> list[str]:
         f"{len(timed_out)} of {n_calls} model calls timed out in {n_traj} of {len(records)} trajectories: "
         "raise client_timeout_s; these turns were resampled, which biases the data toward short chains of thought"
     ]
+
+
+def stripped_warning_errors(records: list[Trajectory], run_config_path: Path) -> list[str]:
+    """With strip_test_modification_warnings on, no prompt may still tell the model not to modify the tests."""
+    if not run_config_path.exists():
+        return []
+    if not json.loads(run_config_path.read_text())["config"].get("strip_test_modification_warnings"):
+        return []
+    from rhablation.prompt_edits import WARNING_MARKERS
+
+    errors = []
+    for r in records:
+        for t in r.turns:
+            found = [m for m in WARNING_MARKERS if t.rendered_prompt and m in t.rendered_prompt]
+            if found:
+                errors.append(f"{r.trajectory_id} turn {t.turn_index}: prompt still contains {found}")
+    return errors
 
 
 def thinking_budget_summary(records: list[Trajectory]) -> str | None:
@@ -178,7 +196,13 @@ def main() -> None:
         )
     print_example(example, args.full)
 
-    sys.exit(1 if errors else 0)
+    prompt_errors = stripped_warning_errors(records, path.parent / "run_config.json")
+    if prompt_errors:
+        print(f"\n== test-modification warnings not stripped: {len(prompt_errors)} ==")
+        for e in prompt_errors[:50]:
+            print(f"  ERROR {e}")
+
+    sys.exit(1 if errors or prompt_errors else 0)
 
 
 if __name__ == "__main__":
