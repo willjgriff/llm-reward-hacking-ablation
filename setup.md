@@ -205,23 +205,31 @@ For long investigations (many models × benchmarks) Claude Code runs on the box 
 bypass-permissions mode, inside tmux. Everything for this lives in `sweep/`.
 
 ```bash
-# laptop: copy the tree (same rsync as above), then, after scripts/setup_box.sh has run:
-ssh -t gpubox bash /workspace/llm-reward-hacking-ablation/sweep/box_claude.sh   # [--watchdog-minutes 120] [--no-watchdog]
+# laptop (the only two things the box cannot get by itself: the code and the HF token)
+rsync -a --exclude .venv --exclude data --exclude .git --exclude .claude ./ gpubox:/workspace/llm-reward-hacking-ablation/
+ssh gpubox 'mkdir -p /root/.config/rhablation && chmod 700 /root/.config/rhablation'
+scp ~/.config/rhablation/upload.env gpubox:/root/.config/rhablation/upload.env
+# everything else happens on the box
+ssh gpubox bash /workspace/llm-reward-hacking-ablation/sweep/box_claude.sh   # [--model claude-fable-5-1] [--no-mission] [--watchdog-minutes 120] [--no-watchdog]
 ssh -t gpubox tmux attach -t claude
 ```
 
-In the tmux session: accept the bypass-permissions notice, `/login` (open the printed URL on the
-laptop, paste the code back), paste `sweep/mission.md` with the benchmarks and models filled in, and
-detach with `Ctrl-b d`. The script:
+In the tmux session: accept the bypass-permissions notice (and `/login` if Claude is not logged in yet:
+open the printed URL on the laptop, paste the code back). Claude was started with a one-line prompt that
+tells it to read and carry out `sweep/mission.md`, so nothing needs pasting; detach with `Ctrl-b d`.
+The script:
 
+- runs `scripts/setup_box.sh --no-serve` first if the box is not set up yet (the agent starts vLLM itself,
+  on `127.0.0.1` only, with the mission's model);
 - installs Claude Code (native installer) and starts `IS_SANDBOX=1 claude --dangerously-skip-permissions`
   in tmux session `claude` (root needs `IS_SANDBOX=1` for that flag);
 - copies `sweep/CLAUDE.unattended.md` to `/root/.claude/CLAUDE.md`: no stopping for approval, all
   model-written code through `rhbench-run`, reports in `box_report/`, uploads under `sweep/` in the HF repo;
 - checks that `rhbench` cannot read `/root/.claude` (where the login token is stored);
-- arms a watchdog (tmux session `watchdog` = `scripts/stop_box_when_idle.sh --idle-minutes 120`). An
-  interactive `claude` does not count as busy, so a session that stalled (usage limit, API error) or
-  finished lets the box stop, disk kept. Resume with
+- arms a watchdog (tmux session `watchdog` = `scripts/stop_box_when_idle.sh --idle-minutes 120`). A `claude`
+  process alone does not count as busy, but a session transcript written to in the last 15 minutes does,
+  so long stretches of coding do not stop the box while a session that stalled (usage limit, API error)
+  or finished still lets it stop, disk kept. Resume with
   `cd /workspace/llm-reward-hacking-ablation && IS_SANDBOX=1 claude --dangerously-skip-permissions --continue`.
 
 Code the agent writes is saved to `sweep/code/` in the same private HF dataset repo by

@@ -3,8 +3,8 @@
 #   bash scripts/stop_box_when_idle.sh [--idle-minutes 30] [--check]
 # Run as root on the box (stage1_pipeline.sh hands over to it after a successful upload).
 # "Stop" halts GPU charges and keeps the disk; it is not "destroy". Busy means any of: an inbound
-# SSH connection (terminal, VS Code, rsync/scp), a benchmark/export/upload/copy process, or vLLM
-# requests in flight. Cancel with: touch /tmp/rhablation-no-stop
+# SSH connection (terminal, VS Code, rsync/scp), a benchmark/export/upload/copy process, vLLM
+# requests in flight, or an unattended Claude Code session that wrote to its transcript recently. Cancel with: touch /tmp/rhablation-no-stop
 # --check only verifies that the instance can stop itself (used as a preflight).
 set -uo pipefail
 
@@ -26,8 +26,11 @@ case "$IDLE_MINUTES" in ''|*[!0-9]*) die "--idle-minutes must be a whole number"
 PORT="${PORT:-8000}"
 CANCEL_FILE="${RHABLATION_NO_STOP_FILE:-/tmp/rhablation-no-stop}"
 LOG=/tmp/stop_box_when_idle.log
+CLAUDE_PROJECTS_DIR="${CLAUDE_PROJECTS_DIR:-$HOME/.claude/projects}"
+CLAUDE_ACTIVE_MINUTES="${CLAUDE_ACTIVE_MINUTES:-15}"
 # Downloads and installs count as busy so a long gap between runs (new model, new env) is not idle.
-# An interactive `claude` session is deliberately not busy: a stalled or finished one must not hold the box up.
+# A `claude` process alone is deliberately not busy: a stalled or finished one must not hold the box up.
+# What counts is its session transcript having been written to recently (CLAUDE_ACTIVE_MINUTES).
 BUSY_PROCS='stage1_run_benchmark|stage1_pipeline|stage1_export|stage1_validate|upload_run|hf upload|hf download|uv (sync|pip)|docker (pull|build)|(^|[ /])(rsync|scp|sftp-server)( |$)'
 
 # Only these two lines are read; the file holds other host-injected secrets.
@@ -74,6 +77,11 @@ busy_reason() {
   n="$(curl -s -m 5 "localhost:$PORT/metrics" 2>/dev/null \
     | awk '/^vllm:num_requests_(running|waiting)\{/ { s += $NF } END { printf "%d", s }')"
   if [ "${n:-0}" -gt 0 ]; then echo "$n vLLM request(s) in flight"; return; fi
+  # An unattended Claude Code session that is working appends to its transcript all the time; one that
+  # hit a usage limit, crashed or finished does not.
+  if [ -n "$(find "$CLAUDE_PROJECTS_DIR" -name '*.jsonl' -mmin "-$CLAUDE_ACTIVE_MINUTES" -print -quit 2>/dev/null)" ]; then
+    echo "claude active in the last $CLAUDE_ACTIVE_MINUTES min"; return
+  fi
 }
 
 say() { echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $*" | tee -a "$LOG"; }

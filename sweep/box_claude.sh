@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# Install Claude Code on the GPU box and start it unattended (bypass-permissions) in tmux. Run as root,
-# after scripts/setup_box.sh:
-#   ssh -t gpubox bash /workspace/llm-reward-hacking-ablation/sweep/box_claude.sh [--watchdog-minutes 120] [--no-watchdog]
-# Then: tmux attach -t claude, /login, paste sweep/mission.md, detach with Ctrl-b d.
+# The one on-box command for the unattended sweep. Run as root after the repo tree (and upload.env) were
+# copied over from the laptop:
+#   ssh gpubox bash /workspace/llm-reward-hacking-ablation/sweep/box_claude.sh [--model claude-fable-5-1] [--no-mission] [--watchdog-minutes 120] [--no-watchdog]
+# Sets the box up if needed (scripts/setup_box.sh --no-serve), installs Claude Code and the unattended
+# rules, and starts Claude in tmux (bypass-permissions) with a prompt that points it at sweep/mission.md.
+# Then: tmux attach -t claude, /login if needed, accept the bypass notice, detach with Ctrl-b d.
 # The watchdog is scripts/stop_box_when_idle.sh: it stops (never destroys) the box after N idle minutes
 # with nobody connected, so a stalled Claude does not keep the GPU billing. Cancel: touch /tmp/rhablation-no-stop
 # Safe to re-run: every step checks whether it is already done.
@@ -10,12 +12,16 @@ set -euo pipefail
 
 WATCHDOG=1
 WATCHDOG_MINUTES=120
+MODEL_ID=claude-fable-5-1
+START_MISSION=1
 while [ $# -gt 0 ]; do
   case "$1" in
     --watchdog-minutes) WATCHDOG_MINUTES="${2:-}"; shift 2 ;;
     --watchdog-minutes=*) WATCHDOG_MINUTES="${1#*=}"; shift ;;
     --no-watchdog) WATCHDOG=0; shift ;;
-    -h|--help) sed -n '2,8p' "$0"; exit 0 ;;
+    --model) MODEL_ID="${2:-}"; shift 2 ;;
+    --no-mission) START_MISSION=0; shift ;;
+    -h|--help) sed -n '2,10p' "$0"; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -32,8 +38,17 @@ die() { echo "ERROR: $*" >&2; exit 1; }
 
 [ "$(id -u)" = 0 ] || die "run as root (vLLM, the upload token and the auto-stop all live under root)"
 case "$WATCHDOG_MINUTES" in ''|*[!0-9]*) die "--watchdog-minutes must be a whole number" ;; esac
-[ -x "$LAUNCHER" ] || die "$LAUNCHER missing: run 'bash scripts/setup_box.sh' first"
 [ -f "$RULES_SRC" ] || die "missing $RULES_SRC"
+[ -f "$REPO_DIR/sweep/mission.md" ] || die "missing $REPO_DIR/sweep/mission.md"
+case "$MODEL_ID" in ''|*[!A-Za-z0-9._-]*) die "--model must be a plain model id or alias" ;; esac
+
+if [ ! -x "$LAUNCHER" ]; then
+  step "Box set-up (scripts/setup_box.sh --no-serve; the agent starts vLLM itself with the mission's model)"
+  bash "$REPO_DIR/scripts/setup_box.sh" --no-serve
+fi
+[ -x "$LAUNCHER" ] || die "$LAUNCHER still missing after set-up"
+UPLOAD_ENV="${RHABLATION_UPLOAD_ENV:-$HOME/.config/rhablation/upload.env}"
+[ -f "$UPLOAD_ENV" ] || echo "WARNING: $UPLOAD_ENV is missing: nothing will be uploaded to Hugging Face until you copy it over (setup.md 'Off-box storage')."
 
 step "Claude Code"
 export PATH="$HOME/.local/bin:$PATH"
@@ -64,8 +79,12 @@ if tmux has-session -t claude 2>/dev/null; then
 else
   # A shell stays behind if claude exits, so the session can be resumed with: claude --continue
   tmux new-session -d -s claude -c "$REPO_DIR"
-  tmux send-keys -t claude "IS_SANDBOX=1 '$CLAUDE_BIN' --dangerously-skip-permissions" Enter
-  echo "started in $REPO_DIR"
+  prompt=""
+  if [ "$START_MISSION" = 1 ]; then
+    prompt=" 'Read sweep/mission.md in this repository and carry it out from start to finish. Follow /root/.claude/CLAUDE.md.'"
+  fi
+  tmux send-keys -t claude "IS_SANDBOX=1 '$CLAUDE_BIN' --dangerously-skip-permissions --model $MODEL_ID$prompt" Enter
+  echo "started in $REPO_DIR (model $MODEL_ID$([ "$START_MISSION" = 1 ] && echo ', mission prompt given'))"
 fi
 
 if [ "$WATCHDOG" = 1 ]; then
@@ -84,8 +103,7 @@ fi
 
 step "Next"
 cat <<EOF
-  tmux attach -t claude        # accept the bypass-permissions notice, then /login (open the URL on your laptop)
-  paste the contents of $REPO_DIR/sweep/mission.md
+  tmux attach -t claude        # accept the bypass-permissions notice (and /login if asked); the mission then starts
   detach with Ctrl-b d; the session keeps running after you disconnect
 Progress:  bash $REPO_DIR/sweep/status.sh [--watch 60]   (summary, live progress of the newest run, watchdog, disk)
            or: rhbench-run uv run scripts/stage1_progress.py --run-dir <run_dir>
