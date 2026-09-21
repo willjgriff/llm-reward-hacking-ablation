@@ -7,7 +7,7 @@ one JSON record per trajectory to `data/stage1/<run_id>/trajectories.jsonl`.
 
 - Linux box with an NVIDIA GPU, root access (tested: 1× RTX PRO 6000 Blackwell, 95 GB, Vast.ai container). ~16 GB VRAM is enough for the 4B model (~24 GB for the 9B).
 - ~35 GB free disk: model weights 9.3 GB (4B) or 19.3 GB (9B), vLLM/torch env ~10 GB, benchmark env ~2 GB.
-- For the `Qwen/Qwen3.8-27B` sweep (`sweep/`): 1× H100 80 GB works in bf16 (~56 GB weights) with a reduced context (`MAX_MODEL_LEN=32768`); more or larger GPUs mainly buy throughput. ≥200 GB disk, and ≥32 vCPUs / 64 GB RAM because sandboxed tests run on the CPU.
+- For the `Qwen/Qwen3.8-27B` sweep (`sweep/`): 1× H100 80 GB works in bf16 (~56 GB weights) with a reduced context (`MAX_MODEL_LEN=32768`); more or larger GPUs mainly buy throughput. ≥32 vCPUs / 64 GB RAM because sandboxed tests run on the CPU. Disk: 150 GB minimum, 200 GB comfortable. Weights 56 GB (one copy in the HF cache; environments never contain the model), +28 GB only if the FP8 fallback is downloaded; vLLM env ~10 GB (mostly torch + CUDA libraries); project env ~2 GB; each further benchmark env 1–6 GB (6 GB when it pulls its own torch); caches ~5 GB; data ~0.7 MB raw / 0.07 MB gzipped per transcript in the compact format. Fixed cost ≈ 75–85 GB without FP8, so 80 GB cannot work and 100 GB leaves no room for the fallback.
 - Internet access on first run. Model and dataset are public; no HF token is needed, and none should be left on the box.
 - An SSH alias on your machine, e.g. in `~/.ssh/config`:
   ```
@@ -144,6 +144,7 @@ rhbench-run uv run scripts/stage1_export_trajectories.py --run-dir data/stage1/<
 rhbench-run uv run scripts/stage1_validate.py --run-dir data/stage1/<run_id>
 ```
 
+- Storage format: records are written in the **compact** form (schema 1.2): each model call stores only the part of its prompt that differs from the previous call (`prompt_prefix_len` + the new ids), and the decoded prompt strings are left out, because ~90% of a full record was the same prompt repeated. `rhablation.compact.expand_trajectory(record, tokenizer)` restores the full record exactly; the validator does this before its checks. `--full` writes the old layout, `--gzip` writes `trajectories.jsonl.gz` (all readers accept it). `uv run scripts/stage1_compact_run.py --run-dir <run_dir> [--gzip]` converts an existing run into a new file next to the original (261 MB → 5 MB gzipped for `promptB-solvable19-tb4096`).
 - Export writes `trajectories.jsonl`: one record per (task, split, scaffold, epoch), schema in
 `src/rhablation/schema.py` — full messages, chain of thought per assistant turn, exact
 prompt/completion text and token ids per turn, final code, benchmark score and raw test
@@ -232,6 +233,11 @@ code-free (`upload_run.sh` refuses `.py`/`.sh`/`.ipynb`). Get the code back with
 (below); after the box has stopped: `bash sweep/pull_box.sh --from-hf <user/name>`. The set-up rsync stays
 as it is: it is ~50 files / ~0.5 MB, `setup_box.sh` needs `pyproject.toml` to build the env, and the
 existing harness, schema, exporter and validator save the agent from rebuilding them.
+
+Progress over SSH: `bash sweep/status.sh [--watch 60]` (top of `SUMMARY.md`, live progress of the newest run,
+watchdog log, free disk), or the usual `rhbench-run uv run scripts/stage1_progress.py --run-dir <run_dir>`:
+every runner the agent writes, also for environments that do not use Inspect, must produce the
+`run_config.json` + `progress.jsonl` that script reads.
 
 Progress without SSH (an open SSH session keeps the box up): `sweep/box_report/SUMMARY.md` in the HF
 dataset repo, refreshed after every model × benchmark pair. Claude spends no tokens while a benchmark

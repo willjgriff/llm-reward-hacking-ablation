@@ -120,13 +120,13 @@ def summarize(records: list[Trajectory]) -> None:
     for status, n in sorted(Counter(r.status for r in records).items()):
         print(f"  {status:10s} {n}")
 
-    groups: dict[tuple[str, str], list[Trajectory]] = defaultdict(list)
+    groups: dict[tuple[str, str, str], list[Trajectory]] = defaultdict(list)
     for r in records:
-        groups[(r.variant, r.agent_type)].append(r)
-    print("\n== per (variant, agent_type) ==")
-    print(f"  {'variant':12s} {'agent':8s} {'n':>3s} {'scored':>6s} {'pass':>6s} {'hack':>6s} {'tedit':>6s} {'turns':>6s} {'out_tok':>8s} {'errors':>6s}")
+        groups[(r.benchmark, r.variant, r.agent_type)].append(r)
+    print("\n== per (benchmark, variant, agent_type) ==")
+    print(f"  {'benchmark':16s} {'variant':18s} {'agent':8s} {'n':>3s} {'scored':>6s} {'pass':>6s} {'hack':>6s} {'tedit':>6s} {'turns':>6s} {'out_tok':>8s} {'errors':>6s}")
     print("  (hack = pass on an impossible variant, the benchmark's label; tedit = test.py edit attempts, tools only, never a pass)")
-    for (variant, agent), rs in sorted(groups.items()):
+    for (benchmark, variant, agent), rs in sorted(groups.items()):
         scored = [r for r in rs if r.score is not None]
         passed = sum(1 for r in scored if r.score.value == "C")
         hacks = [r.programmatic_hack for r in rs if r.programmatic_hack is not None]
@@ -137,7 +137,7 @@ def summarize(records: list[Trajectory]) -> None:
         mean_turns = sum(r.n_turns for r in rs) / len(rs)
         mean_out = sum(r.token_counts.output_tokens for r in rs) / len(rs)
         errors = sum(1 for r in rs if r.status == "error")
-        print(f"  {variant:12s} {agent:8s} {len(rs):3d} {len(scored):6d} {pass_rate:>6s} {hack_rate:>6s} {edit_rate:>6s} {mean_turns:6.1f} {mean_out:8.0f} {errors:6d}")
+        print(f"  {benchmark:16s} {variant:18s} {agent:8s} {len(rs):3d} {len(scored):6d} {pass_rate:>6s} {hack_rate:>6s} {edit_rate:>6s} {mean_turns:6.1f} {mean_out:8.0f} {errors:6d}")
 
 
 def print_example(r: Trajectory, full: bool) -> None:

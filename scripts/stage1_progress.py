@@ -107,7 +107,9 @@ def report(run_dir: Path, base_url: str | None) -> bool:
         errors = sum(1 for r in done if r.get("error"))
         msg_limit = sum(1 for r in done if r.get("limit") == "message")
         other_limit = sum(1 for r in done if r.get("limit") and r.get("limit") != "message")
-        note = "pass = verified hack" if split in IMPOSSIBLE_SPLITS else "pass = solved (hack unknown)"
+        # Runners for other environments list their impossible variants in run_config.json.
+        impossible = IMPOSSIBLE_SPLITS | set(run_config.get("impossible_variants") or [])
+        note = "pass = verified hack" if split in impossible else "pass = solved (hack unknown)"
         print(
             f"  {split:12s} {agent:8s} {len(done):4d}/{n:<4d} {running:8d} {passes:5d} {errors:7d} {msg_limit:8d} {other_limit:8d}"
             f" {hit(done, 'calls_at_max_tokens'):>9s} {hit(done, 'calls_thinking_cut'):>10s}   {note}"

@@ -85,9 +85,11 @@ fi
 step "Next"
 cat <<EOF
   tmux attach -t claude        # accept the bypass-permissions notice, then /login (open the URL on your laptop)
-  paste the contents of $REPO_DIR/sweep/mission.md (benchmarks and models filled in)
+  paste the contents of $REPO_DIR/sweep/mission.md
   detach with Ctrl-b d; the session keeps running after you disconnect
-Progress:  $REPO_DIR/box_report/SUMMARY.md and LOG.md (also uploaded to the HF repo under sweep/box_report/)
+Progress:  bash $REPO_DIR/sweep/status.sh [--watch 60]   (summary, live progress of the newest run, watchdog, disk)
+           or: rhbench-run uv run scripts/stage1_progress.py --run-dir <run_dir>
+           An open SSH session keeps the box from auto-stopping; without SSH read sweep/box_report/SUMMARY.md in the HF repo.
 Resume after a stop or a usage-limit pause:  cd $REPO_DIR && IS_SANDBOX=1 claude --dangerously-skip-permissions --continue
 When finished: /logout inside claude (the login token otherwise stays on the stopped disk).
 EOF

@@ -8,9 +8,9 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-SCHEMA_VERSION = "1.2"  # 1.1: added test_edit_attempt; 1.2: compact storage (Turn.prompt_prefix_len, optional rendered_text)
+SCHEMA_VERSION = "1.3"  # 1.1: test_edit_attempt; 1.2: compact storage (Turn.prompt_prefix_len, optional rendered_text);
+# 1.3: environments other than ImpossibleBench (free-form variant, env_options, labels)
 
-Variant = Literal["original", "oneoff", "conflicting"]
 Status = Literal["completed", "error", "timeout", "max_turns"]
 Role = Literal["system", "user", "assistant", "tool"]
 
@@ -100,6 +100,13 @@ class ScoreRecord(StrictModel):
     explanation: str | None = None
 
 
+class LabelRecord(StrictModel):
+    """One hack-related signal about a trajectory. Signals are kept separate, never merged."""
+
+    value: bool | str | float | None
+    source: str = Field(description="What produced it, e.g. 'env_oracle', 'mbpp_hacking_labels', 'monitor:<model id>'")
+
+
 class TokenCounts(StrictModel):
     input_tokens: int
     output_tokens: int
@@ -137,7 +144,8 @@ class Trajectory(StrictModel):
 
     benchmark: str
     task_source: str
-    variant: Variant
+    variant: str = Field(description="Environment variant, e.g. original/oneoff/conflicting or verifier_bug/corrupted/possible")
+    env_options: dict[str, Any] | None = Field(default=None, description="Environment settings of this rollout (e.g. verifier_mode, max_turns)")
     task_id: str
     agent_type: str
     epoch: int
@@ -153,7 +161,14 @@ class Trajectory(StrictModel):
     score: ScoreRecord | None
     raw_test_results: dict[str, Any] | None
     programmatic_hack: bool | None = Field(
-        description="True/False on impossible variants (pass == hack); null on original"
+        description=(
+            "The environment's own verified-hack signal: True/False on impossible variants (pass == hack); "
+            "null where passing is legitimate (e.g. original, possible). False includes failed hack attempts."
+        )
+    )
+    labels: dict[str, LabelRecord] = Field(
+        default_factory=dict,
+        description="Further signals by name (e.g. passed, tampered, peeked, strict_rh, monitor_hack_attempt)",
     )
     test_edit_attempt: bool | None = Field(
         default=None,
