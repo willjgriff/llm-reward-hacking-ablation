@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from rhablation.compact import compact_trajectory, expand_trajectory, open_trajectories  # noqa: E402
 from rhablation.hack_signals import test_file_writes  # noqa: E402
 from rhablation.schema import (  # noqa: E402
     SCHEMA_VERSION,
@@ -249,7 +250,9 @@ def convert_sample(log: Any, sample: Any, run_config: dict[str, Any], tokenizer:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run-dir", type=Path, required=True, help="data/stage1/<run_id>")
-    parser.add_argument("--output", type=Path, default=None, help="default: <run-dir>/trajectories.jsonl")
+    parser.add_argument("--output", type=Path, default=None, help="default: <run-dir>/trajectories.jsonl (.gz with --gzip)")
+    parser.add_argument("--full", action="store_true", help="store every call's whole prompt ids and rendered strings (~5x larger; the pre-1.2 layout)")
+    parser.add_argument("--gzip", action="store_true", help="write trajectories.jsonl.gz")
     args = parser.parse_args()
 
     run_config = json.loads((args.run_dir / "run_config.json").read_text())
@@ -264,7 +267,7 @@ def main() -> None:
 
     from inspect_ai.log import list_eval_logs, read_eval_log
 
-    output = args.output or (args.run_dir / "trajectories.jsonl")
+    output = args.output or (args.run_dir / ("trajectories.jsonl.gz" if args.gzip else "trajectories.jsonl"))
     records: list[Trajectory] = []
     for info in list_eval_logs(str(args.run_dir / "logs")):
         log = read_eval_log(info, resolve_attachments=True)
@@ -272,14 +275,21 @@ def main() -> None:
             print(f"skip (no samples): {log.location} status={log.status}")
             continue
         for sample in log.samples:
-            records.append(convert_sample(log, sample, run_config, tokenizer, chat_template_sha))
+            record = convert_sample(log, sample, run_config, tokenizer, chat_template_sha)
+            if not args.full:
+                compact = compact_trajectory(record)
+                restored = expand_trajectory(compact)
+                if [t.prompt_token_ids for t in restored.turns] != [t.prompt_token_ids for t in record.turns]:
+                    raise RuntimeError(f"{record.trajectory_id}: compact form does not restore the prompt ids")
+                record = compact
+            records.append(record)
         print(f"{log.location}: {len(log.samples)} samples")
 
     records.sort(key=lambda r: r.trajectory_id)
-    with output.open("w") as f:
+    with open_trajectories(output, "w") as f:
         for r in records:
             f.write(r.model_dump_json() + "\n")
-    print(f"wrote {len(records)} trajectories to {output}")
+    print(f"wrote {len(records)} {'full' if args.full else 'compact'} trajectories to {output} ({output.stat().st_size / 1e6:.1f} MB)")
 
 
 if __name__ == "__main__":

@@ -157,7 +157,7 @@ def main() -> None:
     }
     run_config_path = run_dir / "run_config.json"
     run_config_path.write_text(json.dumps(run_config, indent=2))
-    print(f"run_id={run_id} model_revision={model_revision} vllm={vllm_version} client_timeout_s={cfg.client_timeout_s}")
+    print(f"run_id={run_id} model_revision={model_revision} vllm={vllm_version} client_timeout_s={cfg.client_timeout_s} sample_time_limit_s={cfg.sample_time_limit_s} seed={cfg.sampling.seed}")
 
     os.environ["RHABLATION_PROGRESS_FILE"] = str((run_dir / "progress.jsonl").resolve())
     import rhablation.progress  # noqa: F401  (registers the Inspect progress hook)
@@ -193,6 +193,7 @@ def main() -> None:
             # vLLM sampling parameter (needs --reasoning-parser): ends the thinking, not the whole call.
             **({"thinking_token_budget": cfg.sampling.thinking_token_budget} if cfg.sampling.thinking_token_budget is not None else {}),
         },
+        time_limit=cfg.sample_time_limit_s,
         max_connections=cfg.max_connections,
         max_samples=cfg.max_connections,
         max_sandboxes=cfg.max_connections,

@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from rhablation.compact import open_trajectories, trajectories_path  # noqa: E402
 from rhablation.judge_transcript import CATEGORIES, CHANNELS, STATUSES, check_flags  # noqa: E402
 
 
@@ -46,7 +47,7 @@ def main() -> None:
         assert f["status"] in STATUSES, f"unknown status {f['status']}"
         assert f["channel"] in CHANNELS, f"unknown channel {f['channel']}"
     traj = next(
-        t for line in (Path("data/stage1") / item["run_id"] / "trajectories.jsonl").open()
+        t for line in open_trajectories(trajectories_path(Path("data/stage1") / item["run_id"]))
         if (t := json.loads(line))["trajectory_id"] == item["trajectory_id"]
     )
     problems = check_flags(traj, flags)

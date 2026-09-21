@@ -15,6 +15,8 @@ class SamplingConfig(BaseModel):
     # vLLM forces </think> after this many thinking tokens, so the call still returns an answer.
     # null = unlimited (then a long chain of thought can use up max_tokens and return nothing).
     thinking_token_budget: int | None = 4096
+    # Sent unchanged with every request, so with samples_per_task > 1 the samples of a task start out
+    # identical (seen in promptB-solvable19-tb4096). Use null (--no-seed) when collecting many samples per task.
     seed: int | None = 1234
 
 
@@ -57,6 +59,10 @@ class Stage1Config(BaseModel):
     # tool call that started them lost track of them (rhablation/orphan_reaper.py). Without it one
     # infinite loop behind a pipe hangs the run. The tools time out at 60 s. null = off.
     orphan_grace_s: int | None = 120
+    # Wall-clock limit per sample (Inspect time_limit). The sample is stopped, scored as it stands and
+    # exported with status "timeout", so a few slow samples cannot hold a run open. Biases against slow
+    # trajectories; report how many hit it. null = off.
+    sample_time_limit_s: int | None = None
 
 
 def add_config_args(parser: argparse.ArgumentParser) -> None:
@@ -76,6 +82,8 @@ def add_config_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--sandbox")
     parser.add_argument("--max-connections", type=int)
     parser.add_argument("--client-timeout-s", type=int, help="HTTP timeout per model call, in seconds")
+    parser.add_argument("--sample-time-limit-s", type=int, help="wall-clock limit per sample, in seconds (default: none)")
+    parser.add_argument("--no-seed", action="store_true", help="send no sampling seed (needed for distinct samples when samples_per_task > 1)")
 
 
 def load_config(args: argparse.Namespace) -> Stage1Config:
@@ -83,11 +91,13 @@ def load_config(args: argparse.Namespace) -> Stage1Config:
     for key in (
         "run_id", "output_dir", "model", "model_revision", "vllm_base_url", "splits",
         "agent_types", "limit", "offset", "task_ids", "samples_per_task", "max_attempts", "sandbox",
-        "max_connections", "client_timeout_s",
+        "max_connections", "client_timeout_s", "sample_time_limit_s",
     ):
         value = getattr(args, key, None)
         if value is not None:
             raw[key] = value
     if raw.get("limit") == 0:
         raw["limit"] = None
+    if getattr(args, "no_seed", False):
+        raw["sampling"] = {**(raw.get("sampling") or {}), "seed": None}
     return Stage1Config.model_validate(raw)

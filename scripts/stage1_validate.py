@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Stage 1: validate trajectories.jsonl against the schema and print a summary.
+"""Stage 1: validate trajectories.jsonl[.gz] (full or compact) against the schema and print a summary.
 
 Schema violations fail (exit 1), as does a "do not modify the tests" instruction surviving in a
 run with strip_test_modification_warnings on. Chain-of-thought / token integrity checks are warnings.
@@ -14,12 +14,13 @@ from pathlib import Path
 from pydantic import ValidationError
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from rhablation.compact import expand_trajectory, is_compact, open_trajectories, trajectories_path  # noqa: E402
 from rhablation.schema import Trajectory  # noqa: E402
 
 
 def load(path: Path) -> tuple[list[Trajectory], list[str]]:
     records, errors = [], []
-    with path.open() as f:
+    with open_trajectories(path) as f:
         for lineno, line in enumerate(f, 1):
             if not line.strip():
                 continue
@@ -84,6 +85,11 @@ def stripped_warning_errors(records: list[Trajectory], run_config_path: Path) ->
             found = [m for m in WARNING_MARKERS if t.rendered_prompt and m in t.rendered_prompt]
             if found:
                 errors.append(f"{r.trajectory_id} turn {t.turn_index}: prompt still contains {found}")
+        # Compact records checked without a tokenizer have no rendered prompts: fall back to the messages.
+        if not any(t.rendered_prompt for t in r.turns):
+            found = [m for m in WARNING_MARKERS if any(m in msg.content for msg in r.messages)]
+            if found:
+                errors.append(f"{r.trajectory_id}: messages still contain {found}")
     return errors
 
 
@@ -148,14 +154,14 @@ def print_example(r: Trajectory, full: bool) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--run-dir", type=Path, help="data/stage1/<run_id>; reads <run-dir>/trajectories.jsonl")
+    parser.add_argument("--run-dir", type=Path, help="data/stage1/<run_id>; reads <run-dir>/trajectories.jsonl or .jsonl.gz")
     parser.add_argument("--file", type=Path, help="explicit JSONL path")
     parser.add_argument("--example-id", help="trajectory_id to print (default: first completed impossible-variant record)")
     parser.add_argument("--full", action="store_true", help="print full token id arrays in the example")
     parser.add_argument("--no-tokenizer-check", action="store_true", help="skip the re-encode warning check")
     args = parser.parse_args()
 
-    path = args.file or (args.run_dir / "trajectories.jsonl" if args.run_dir else None)
+    path = args.file or (trajectories_path(args.run_dir) if args.run_dir else None)
     if path is None:
         parser.error("--run-dir or --file required")
 
@@ -173,6 +179,24 @@ def main() -> None:
         from transformers import AutoTokenizer
 
         tokenizer = AutoTokenizer.from_pretrained(records[0].model, revision=records[0].model_revision)
+
+    n_compact = sum(is_compact(r) for r in records)
+    print(f"storage: {n_compact} compact, {len(records) - n_compact} full; schema versions {sorted({r.schema_version for r in records})}")
+    # Compact records store prompts as a delta; every check below runs on the restored full record.
+    expanded, compact_errors = [], []
+    for r in records:
+        try:
+            expanded.append(expand_trajectory(r, tokenizer))
+        except ValueError as e:
+            compact_errors.append(str(e))
+    records = expanded
+    if compact_errors:
+        print(f"\n== compact-form errors: {len(compact_errors)} ==")
+        for e in compact_errors[:50]:
+            print(f"  ERROR {e}")
+        errors += compact_errors
+    if not records:
+        sys.exit(1)
 
     warnings = timeout_warnings(records) + integrity_warnings(records, tokenizer)
     summarize(records)

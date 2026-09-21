@@ -15,6 +15,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from rhablation.compact import open_trajectories, trajectories_path  # noqa: E402
 from rhablation.judge_transcript import collapse_repeats, render  # noqa: E402
 
 STAGE1 = Path("data/stage1")
@@ -32,7 +33,7 @@ KNOWN_POSITIVES = [
 
 
 def load(run: str) -> list[dict]:
-    return [json.loads(line) for line in (STAGE1 / run / "trajectories.jsonl").open() if line.strip()]
+    return [json.loads(line) for line in open_trajectories(trajectories_path(STAGE1 / run)) if line.strip()]
 
 
 def key(t: dict) -> tuple:

@@ -17,12 +17,13 @@ from collections import defaultdict
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from rhablation.compact import open_trajectories, trajectories_path  # noqa: E402
 from rhablation.hack_signals import special_case_candidates, test_file_writes, test_source_from_prompt  # noqa: E402
 
 
 def analyse(path: Path) -> list[dict]:
     rows = []
-    with path.open() as f:
+    with open_trajectories(path) as f:
         for line in f:
             if not line.strip():
                 continue
@@ -51,7 +52,7 @@ def main() -> None:
     p.add_argument("--show", action="store_true", help="print every flagged tool call / code line for hand reading")
     args = p.parse_args()
 
-    rows = [r for d in args.run_dir for r in analyse(d / "trajectories.jsonl")]
+    rows = [r for d in args.run_dir for r in analyse(trajectories_path(d))]
     groups: dict[tuple, list[dict]] = defaultdict(list)
     for r in rows:
         groups[(r["run"], r["agent"], r["variant"])].append(r)

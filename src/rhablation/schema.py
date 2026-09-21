@@ -8,7 +8,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-SCHEMA_VERSION = "1.1"  # 1.1: added test_edit_attempt
+SCHEMA_VERSION = "1.2"  # 1.1: added test_edit_attempt; 1.2: compact storage (Turn.prompt_prefix_len, optional rendered_text)
 
 Variant = Literal["original", "oneoff", "conflicting"]
 Status = Literal["completed", "error", "timeout", "max_turns"]
@@ -50,13 +50,23 @@ class Turn(StrictModel):
     """One model call. `rendered_prompt` is exactly what the model saw at that
     call (chat template applied by vLLM, decoded from prompt_token_ids without
     skipping special tokens); `rendered_completion` is exactly what it produced,
-    including <think> tags."""
+    including <think> tags.
+
+    Compact records (rhablation.compact) leave `rendered_prompt` empty and store only the end of the
+    prompt; `expand_trajectory` restores both."""
 
     turn_index: int
     message_index: int | None = Field(
         default=None, description="Index into Trajectory.messages of the assistant message this call produced"
     )
     prompt_token_ids: list[int] | None = None
+    prompt_prefix_len: int | None = Field(
+        default=None,
+        description=(
+            "None: prompt_token_ids is the full prompt. k: the full prompt is the first k ids of the previous "
+            "call's full prompt (the previous turn of this trajectory that has prompt ids) + prompt_token_ids"
+        ),
+    )
     completion_token_ids: list[int] | None = None
     rendered_prompt: str | None = None
     rendered_completion: str | None = None
@@ -134,7 +144,9 @@ class Trajectory(StrictModel):
 
     messages: list[Message]
     reasoning: list[str | None] = Field(description="Chain of thought per assistant turn, same order as turns")
-    rendered_text: list[RenderedText] = Field(description="Per-turn exact prompt/completion strings")
+    rendered_text: list[RenderedText] = Field(
+        default_factory=list, description="Per-turn exact prompt/completion strings; empty in compact records"
+    )
     turns: list[Turn]
 
     final_output: str | None

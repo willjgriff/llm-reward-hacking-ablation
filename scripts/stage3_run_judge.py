@@ -25,6 +25,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from rhablation.compact import open_trajectories, trajectories_path  # noqa: E402
 from rhablation.judge_transcript import CATEGORIES, CHANNELS, STATUSES, check_flags  # noqa: E402
 
 RUBRIC = "configs/judge/impossiblebench_lcb_rubric.md"
@@ -96,7 +97,7 @@ def main() -> None:
 
     trajs = {}
     for run_id in {i["run_id"] for i in todo}:
-        for line in (args.stage1_dir / run_id / "trajectories.jsonl").open():
+        for line in open_trajectories(trajectories_path(args.stage1_dir / run_id)):
             t = json.loads(line)
             trajs[t["trajectory_id"]] = t
     lock = threading.Lock()

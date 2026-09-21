@@ -7,6 +7,7 @@ one JSON record per trajectory to `data/stage1/<run_id>/trajectories.jsonl`.
 
 - Linux box with an NVIDIA GPU, root access (tested: 1× RTX PRO 6000 Blackwell, 95 GB, Vast.ai container). ~16 GB VRAM is enough for the 4B model (~24 GB for the 9B).
 - ~35 GB free disk: model weights 9.3 GB (4B) or 19.3 GB (9B), vLLM/torch env ~10 GB, benchmark env ~2 GB.
+- For the `Qwen/Qwen3.8-27B` sweep (`sweep/`): 1× H100 80 GB works in bf16 (~56 GB weights) with a reduced context (`MAX_MODEL_LEN=32768`); more or larger GPUs mainly buy throughput. ≥200 GB disk, and ≥32 vCPUs / 64 GB RAM because sandboxed tests run on the CPU.
 - Internet access on first run. Model and dataset are public; no HF token is needed, and none should be left on the box.
 - An SSH alias on your machine, e.g. in `~/.ssh/config`:
   ```
@@ -129,6 +130,8 @@ rhbench-run uv run scripts/stage1_run_benchmark.py --run-id lcb-4b-part2 --offse
 
 All settings live in `configs/stage1_lcb.yaml`; CLI overrides: `--limit`, `--offset`, `--splits`,
 `--agent-types`, `--sandbox`, `--samples-per-task`, `--task-ids`, `--model`,
+`--sample-time-limit-s` (wall-clock limit per sample; the sample is exported with status `timeout`),
+`--no-seed` (needed for distinct samples when `--samples-per-task` > 1: a fixed seed is sent unchanged with every request),
 `--vllm-base-url`, `--run-id`. The script prints the `run_id` and the selected task ids
 (identical across splits by construction), then the benchmark's own accuracy per task.
 Before starting it checks that vLLM serves the configured model with a large enough
@@ -192,7 +195,66 @@ runs as root, never through `rhbench-run`. Upload a run by hand (also works from
 bash scripts/upload_run.sh --run-dir /home/rhbench/llm-reward-hacking-ablation/data/stage1/<run_id>
 ```
 
-It refuses to upload a run directory that contains symlinks.
+It refuses to upload a run directory that contains symlinks. `--dest-prefix <path>` uploads to
+`<path>/<run_id>/` instead of `stage1/<run_id>/` (the unattended sweep uses `sweep/<model>/<benchmark>`).
+
+## Unattended Claude Code on the box
+
+For long investigations (many models × benchmarks) Claude Code runs on the box itself, as root, in
+bypass-permissions mode, inside tmux. Everything for this lives in `sweep/`.
+
+```bash
+# laptop: copy the tree (same rsync as above), then, after scripts/setup_box.sh has run:
+ssh -t gpubox bash /workspace/llm-reward-hacking-ablation/sweep/box_claude.sh   # [--watchdog-minutes 120] [--no-watchdog]
+ssh -t gpubox tmux attach -t claude
+```
+
+In the tmux session: accept the bypass-permissions notice, `/login` (open the printed URL on the
+laptop, paste the code back), paste `sweep/mission.md` with the benchmarks and models filled in, and
+detach with `Ctrl-b d`. The script:
+
+- installs Claude Code (native installer) and starts `IS_SANDBOX=1 claude --dangerously-skip-permissions`
+  in tmux session `claude` (root needs `IS_SANDBOX=1` for that flag);
+- copies `sweep/CLAUDE.unattended.md` to `/root/.claude/CLAUDE.md`: no stopping for approval, all
+  model-written code through `rhbench-run`, reports in `box_report/`, uploads under `sweep/` in the HF repo;
+- checks that `rhbench` cannot read `/root/.claude` (where the login token is stored);
+- arms a watchdog (tmux session `watchdog` = `scripts/stop_box_when_idle.sh --idle-minutes 120`). An
+  interactive `claude` does not count as busy, so a session that stalled (usage limit, API error) or
+  finished lets the box stop, disk kept. Resume with
+  `cd /workspace/llm-reward-hacking-ablation && IS_SANDBOX=1 claude --dangerously-skip-permissions --continue`.
+
+Code the agent writes is saved to `sweep/code/` in the same private HF dataset repo by
+`sweep/upload_code.sh` (a mirror of the box's code tree; every upload is a commit, so earlier versions
+stay in the history; it refuses to upload if a file contains a credential). That is the only way code
+leaves the box: the tree arrives without `.git`, the box holds no GitHub credentials, and the rules forbid
+git and any other service, so the GitHub repo cannot be touched from the box. Run data folders stay
+code-free (`upload_run.sh` refuses `.py`/`.sh`/`.ipynb`). Get the code back with `sweep/pull_box.sh`
+(below); after the box has stopped: `bash sweep/pull_box.sh --from-hf <user/name>`. The set-up rsync stays
+as it is: it is ~50 files / ~0.5 MB, `setup_box.sh` needs `pyproject.toml` to build the env, and the
+existing harness, schema, exporter and validator save the agent from rebuilding them.
+
+Progress without SSH (an open SSH session keeps the box up): `sweep/box_report/SUMMARY.md` in the HF
+dataset repo, refreshed after every model × benchmark pair. Claude spends no tokens while a benchmark
+runs; it is re-invoked when the background run exits.
+
+When finished, run `/logout` in the session: a stopped Vast disk otherwise keeps the login token.
+
+### Keeping the laptop safe from the box
+
+The box runs model-written code and an agent with web access as root, so treat its contents as untrusted.
+SSH only pulls, so the ways back to the laptop are the ones you open yourself:
+
+- Use plain `ssh`/tmux for this box, not a VS Code Remote-SSH window (a compromised remote can run
+  code on the local machine through it). Keep agent and X11 forwarding off (`ssh -G gpubox | grep -i forward`).
+- Never rsync the box's tree over the working tree: `scripts/`, `pyproject.toml`, `.claude/`, `.vscode/`,
+  `CLAUDE.md` and `.git/hooks` all get executed or obeyed later. Use `bash sweep/pull_box.sh`: markdown
+  reports land in `data/box_report/<time>/`, the code lands in `~/rhablation-box-quarantine/<time>/`
+  with symlinks skipped and execute bits stripped, and you read the diff and apply changes by hand.
+  `--from-hf <user/name>` does the same from `sweep/code/` in the HF repo; treat that code as equally untrusted.
+- Transcripts come back through the HF dataset repo. Only load JSON/JSONL/safetensors/
+  `np.load(allow_pickle=False)`; never `torch.load` or unpickle a file from the box.
+- Credentials on the box must all be narrow and revocable: the Claude login, the one-repo HF token, the
+  instance-scoped Vast key. No SSH keys, GitHub tokens or account-wide HF tokens.
 
 
 
