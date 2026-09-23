@@ -1,3 +1,5 @@
+**Updates: `sweep/mission_update_1.md` overrides this file where they differ (bf16 only, one overall deadline, an added `max_turns=4` variant). Read it too.**
+
 Read `/root/.claude/CLAUDE.md` and the project `CLAUDE.md` first; the first overrides the second, and
 this mission overrides both where it is more specific. Nobody is watching: wherever this says "report",
 write it to `box_report/` and carry on without waiting for an answer.
@@ -22,7 +24,7 @@ raise `MAX_MODEL_LEN` only if turns fail with context-length errors. Record the 
 concurrency vLLM prints at startup, and run about that many rollouts concurrently. (On a box with several
 GPUs instead, use all of them and record the flags.)
 
-Fallback to FP8: if the bf16 pilots project that none, or only one, of the environments reaches the
+(Withdrawn by `sweep/mission_update_1.md`: bf16 only.) ~~Fallback to FP8~~: if the bf16 pilots project that none, or only one, of the environments reaches the
 targets within its budget, switch to `Qwen/Qwen3.8-27B-FP8`, re-run the pilots and decide again. Never mix
 the two within one environment variant. Record weights repo, revision and dtype on every transcript and in
 `SUMMARY.md`, and put both pilots' numbers and the switch decision in `PILOT.md`.

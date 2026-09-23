@@ -229,7 +229,8 @@ The script:
 - arms a watchdog (tmux session `watchdog` = `scripts/stop_box_when_idle.sh --idle-minutes 120`). A `claude`
   process alone does not count as busy, but a session transcript written to in the last 15 minutes does,
   so long stretches of coding do not stop the box while a session that stalled (usage limit, API error)
-  or finished still lets it stop, disk kept. Resume with
+  or finished still lets it stop, disk kept. Resume from the directory the session was started in (the
+  repo; the 2026-09-21 run was started in `/workspace` because the Vast shell start-up changed directory) with
   `cd /workspace/llm-reward-hacking-ablation && IS_SANDBOX=1 claude --dangerously-skip-permissions --continue`.
 
 Code the agent writes is saved to `sweep/code/` in the same private HF dataset repo by
@@ -267,6 +268,13 @@ SSH only pulls, so the ways back to the laptop are the ones you open yourself:
   `--from-hf <user/name>` does the same from `sweep/code/` in the HF repo; treat that code as equally untrusted.
 - Transcripts come back through the HF dataset repo. Only load JSON/JSONL/safetensors/
   `np.load(allow_pickle=False)`; never `torch.load` or unpickle a file from the box.
+- **Account connectors.** A subscription `/login` on the box brings the account's claude.ai connectors with
+  it (found 2026-09-21: `claude mcp list` on the box showed Google Drive and Claude Docs connected). In
+  bypass mode the agent, or anything that prompt-injects it, could use them without asking. That is not a
+  path to the laptop, but it is personal data reachable from a rented box. `sweep/box_claude.sh` therefore
+  starts Claude with `--strict-mcp-config` (no MCP servers at all), writes `mcp__*` deny rules to
+  `/root/.claude/settings.json`, and the rules file forbids adding servers. Keep the flag when resuming by
+  hand. If you have a Claude account without connectors, log the box in with that one instead.
 - Credentials on the box must all be narrow and revocable: the Claude login, the one-repo HF token, the
   instance-scoped Vast key. No SSH keys, GitHub tokens or account-wide HF tokens.
 
