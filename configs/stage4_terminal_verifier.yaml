@@ -1,0 +1,82 @@
+# Stage 4: reward-hacking directions from the Qwen3.8-27B TerminalVerifierEnv sweep (2026-09-21/22).
+# Used by scripts/stage4_build_manifest.py, stage4_cache_activations.py and stage4_directions.py.
+manifest_id: tv27b
+model: Qwen/Qwen3.8-27B
+model_revision: 1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0
+dtype: bfloat16
+# Qwen3.5/3.8 tokenizer ids the masks rely on (checked against the tokenizer at revision above).
+think_open_id: 248068
+think_close_id: 248069
+im_end_id: 248046
+newline_id: 198
+
+data:
+  sweep_dirs:
+    - data/sweep/Qwen3.8-27B/terminal_verifier_verifier_bug_mt6
+    - data/sweep/Qwen3.8-27B/terminal_verifier_verifier_bug_mt4
+    - data/sweep/Qwen3.8-27B/terminal_verifier_corrupted_mt6
+    - data/sweep/Qwen3.8-27B/terminal_verifier_possible_mt6
+  exclude_run_ids: []
+
+# First matching rule wins. programmatic_hack: env oracle `passed` on an impossible verifier (verified hack);
+# null on `possible`. tampered/passed: the env oracle's own flags (labels.*.value).
+classes:
+  - {name: hack_vb, variant: verifier_bug, programmatic_hack: true}
+  - {name: attempt_vb, variant: verifier_bug, tampered: true, passed: false}
+  - {name: nonhack_A, variant: verifier_bug, max_turns: 4, tampered: false, passed: false}
+  - {name: neither_vb_mt6, variant: verifier_bug, max_turns: 6, tampered: false, passed: false}
+  - {name: hack_corr, variant: corrupted, programmatic_hack: true}
+  - {name: nonhack_corr, variant: corrupted, programmatic_hack: false}
+  - {name: pass_possible, variant: possible, passed: true, tampered: false}
+  - {name: fail_possible, variant: possible, passed: false}
+
+split: {eval_fraction: 0.2, seed: 0}   # by task ID, shared by all variants; written to splits.json
+
+order:
+  priority_classes: [hack_vb, nonhack_A, hack_corr, pass_possible, attempt_vb]
+  subset_per_class: 400
+  seed: 0
+
+cache:
+  storage_dtype: float16
+  aggregations: [cot_mean, answer_mean, prompt_last, completion_last]
+  chunk_trajectories: 256
+  max_tokens_per_batch: 32768
+  max_batch_size: 16
+  max_seq_len: 16384
+  nll_sample_rate: 0.05
+  attn_implementation: null
+  max_abs_activation: 60000.0
+
+analysis:
+  aggregations: [cot_mean, answer_mean, completion_mean, prompt_last, completion_last]
+  contrasts:
+    vb_vs_A:      {positive: [hack_vb], negative: [nonhack_A], description: "verifier_bug hacks vs same-task mt4 rollouts that neither tampered nor passed"}
+    vb_vs_B:      {positive: [hack_vb], negative: [pass_possible], description: "verifier_bug hacks vs honest passes on the solvable version"}
+    corr_vs_A:    {positive: [hack_corr], negative: [nonhack_A], description: "corrupted hacks vs verifier_bug mt4 non-hacks"}
+    corr_vs_B:    {positive: [hack_corr], negative: [pass_possible], description: "corrupted hacks vs honest passes on the solvable version"}
+    vb_vs_corr:   {positive: [hack_vb], negative: [hack_corr], description: "secondary: tamper-type hacks vs copy-the-wrong-answer hacks"}
+    vb_mt4_vs_A:  {positive: [hack_vb], positive_max_turns: 4, negative: [nonhack_A], description: "robustness: same max_turns on both sides"}
+    allhacks_vs_A: {positive: [hack_vb, hack_corr], negative: [nonhack_A], description: "pooled hacks vs non-hacks"}
+  probe_C: 1.0
+  probe_layer_stride: 8
+  probe_max_iter: 500
+  sample_sizes: [50, 100, 200, 400]
+  sample_reps: 10
+  bootstrap_reps: 20
+  winsorization_quantile: null
+  covariates: [n_calls, seq_len, n_cot_tokens, max_turns]
+  cosine_pairs:
+    - [vb_vs_A, corr_vs_A]
+    - [vb_vs_B, corr_vs_B]
+    - [vb_vs_A, vb_vs_B]
+    - [corr_vs_A, corr_vs_B]
+    - [vb_vs_A, vb_vs_corr]
+    - [vb_vs_A, allhacks_vs_A]
+    - [vb_vs_A, vb_mt4_vs_A]
+  transfer_pairs:
+    - [vb_vs_A, corr_vs_A]
+    - [corr_vs_A, vb_vs_A]
+    - [vb_vs_B, corr_vs_B]
+    - [corr_vs_B, vb_vs_B]
+  seed: 0

@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # The one on-box command for the unattended sweep. Run as root after the repo tree (and upload.env) were
 # copied over from the laptop:
-#   ssh gpubox bash /workspace/llm-reward-hacking-ablation/sweep/box_claude.sh [--model claude-fable-5-1] [--no-mission] [--watchdog-minutes 120] [--no-watchdog]
+#   ssh gpubox bash /workspace/llm-reward-hacking-ablation/sweep/box_claude.sh [--model claude-fable-5-1] [--mission sweep/mission.md] [--no-mission] [--watchdog-minutes 120] [--no-watchdog]
 # Sets the box up if needed (scripts/setup_box.sh --no-serve), installs Claude Code and the unattended
-# rules, and starts Claude in tmux (bypass-permissions) with a prompt that points it at sweep/mission.md.
+# rules, and starts Claude in tmux (bypass-permissions) with a prompt that points it at the mission file
+# (--mission, relative to the repo; default sweep/mission.md).
 # Then: tmux attach -t claude, /login if needed, accept the bypass notice, detach with Ctrl-b d.
 # The watchdog is scripts/stop_box_when_idle.sh: it stops (never destroys) the box after N idle minutes
 # with nobody connected, so a stalled Claude does not keep the GPU billing. Cancel: touch /tmp/rhablation-no-stop
@@ -14,12 +15,14 @@ WATCHDOG=1
 WATCHDOG_MINUTES=120
 MODEL_ID=claude-fable-5-1
 START_MISSION=1
+MISSION=sweep/mission.md
 while [ $# -gt 0 ]; do
   case "$1" in
     --watchdog-minutes) WATCHDOG_MINUTES="${2:-}"; shift 2 ;;
     --watchdog-minutes=*) WATCHDOG_MINUTES="${1#*=}"; shift ;;
     --no-watchdog) WATCHDOG=0; shift ;;
     --model) MODEL_ID="${2:-}"; shift 2 ;;
+    --mission) MISSION="${2:-}"; shift 2 ;;
     --no-mission) START_MISSION=0; shift ;;
     -h|--help) sed -n '2,10p' "$0"; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
@@ -39,7 +42,8 @@ die() { echo "ERROR: $*" >&2; exit 1; }
 [ "$(id -u)" = 0 ] || die "run as root (vLLM, the upload token and the auto-stop all live under root)"
 case "$WATCHDOG_MINUTES" in ''|*[!0-9]*) die "--watchdog-minutes must be a whole number" ;; esac
 [ -f "$RULES_SRC" ] || die "missing $RULES_SRC"
-[ -f "$REPO_DIR/sweep/mission.md" ] || die "missing $REPO_DIR/sweep/mission.md"
+case "$MISSION" in ''|/*|*..*|*[!A-Za-z0-9._/-]*) die "--mission must be a plain path relative to the repo, e.g. sweep/mission_stage4.md" ;; esac
+[ -f "$REPO_DIR/$MISSION" ] || die "missing $REPO_DIR/$MISSION"
 case "$MODEL_ID" in ''|*[!A-Za-z0-9._-]*) die "--model must be a plain model id or alias" ;; esac
 
 if [ ! -x "$LAUNCHER" ]; then
@@ -101,12 +105,12 @@ else
   tmux new-session -d -s claude -c "$REPO_DIR"
   prompt=""
   if [ "$START_MISSION" = 1 ]; then
-    prompt=" 'Read sweep/mission.md in this repository and carry it out from start to finish. Follow /root/.claude/CLAUDE.md.'"
+    prompt=" 'Read $MISSION in this repository and carry it out from start to finish. Follow /root/.claude/CLAUDE.md.'"
   fi
   # cd explicitly: the Vast image's shell start-up changes to \$WORKSPACE after tmux has set the directory,
   # and Claude's project (and what `--continue` finds later) is the directory it was started in.
   tmux send-keys -t claude "cd '$REPO_DIR' && IS_SANDBOX=1 '$CLAUDE_BIN' --dangerously-skip-permissions --strict-mcp-config --model $MODEL_ID$prompt" Enter
-  echo "started in $REPO_DIR (no MCP servers, model $MODEL_ID$([ "$START_MISSION" = 1 ] && echo ', mission prompt given'))"
+  echo "started in $REPO_DIR (no MCP servers, model $MODEL_ID$([ "$START_MISSION" = 1 ] && echo ", mission $MISSION"))"
 fi
 
 if [ "$WATCHDOG" = 1 ]; then

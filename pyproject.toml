@@ -13,6 +13,9 @@ dependencies = [
     "huggingface-hub>=0.30",
     "pydantic>=2.7",
     "pyyaml>=6.0",
+    "numpy>=2.5.3",
+    "scikit-learn>=1.9.1",
+    "safetensors>=0.8.0",
 ]
 
 [build-system]

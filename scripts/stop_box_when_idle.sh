@@ -31,7 +31,7 @@ CLAUDE_ACTIVE_MINUTES="${CLAUDE_ACTIVE_MINUTES:-15}"
 # Downloads and installs count as busy so a long gap between runs (new model, new env) is not idle.
 # A `claude` process alone is deliberately not busy: a stalled or finished one must not hold the box up.
 # What counts is its session transcript having been written to recently (CLAUDE_ACTIVE_MINUTES).
-BUSY_PROCS='stage1_run_benchmark|stage1_pipeline|stage1_export|stage1_validate|upload_run|hf upload|hf download|uv (sync|pip)|docker (pull|build)|(^|[ /])(rsync|scp|sftp-server)( |$)'
+BUSY_PROCS='stage1_run_benchmark|stage1_pipeline|stage1_export|stage1_validate|stage4_cache_activations|stage4_directions|upload_run|hf upload|hf download|uv (sync|pip)|docker (pull|build)|(^|[ /])(rsync|scp|sftp-server)( |$)'
 
 # Only these two lines are read; the file holds other host-injected secrets.
 env_value() { grep -E "^(export )?$1=" /etc/environment 2>/dev/null | tail -1 | sed -E "s/^(export )?$1=//; s/^[\"']//; s/[\"']\$//"; }
