@@ -1,0 +1,520 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trajectory viewer</title>
+<style>
+  :root {
+    --bg: #ffffff; --bg2: #f5f6f8; --bg3: #eceef2; --fg: #1c1e24; --fg2: #5c6270; --line: #d9dce3;
+    --accent: #2b5fd9; --red: #c93c3c; --green: #2c8a4e; --amber: #b8770d; --purple: #7343b8;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #16181d; --bg2: #1e2128; --bg3: #262a33; --fg: #e6e8ee; --fg2: #9aa1b0; --line: #333846;
+      --accent: #7aa2ff; --red: #ff7b7b; --green: #6fd08c; --amber: #f0b64a; --purple: #b79cf0;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--bg); color: var(--fg); font: 13px/1.45 var(--sans); display: flex; }
+  a { color: var(--accent); }
+  button, select, input { font: inherit; color: inherit; background: var(--bg2); border: 1px solid var(--line); border-radius: 4px; padding: 3px 7px; }
+  button { cursor: pointer; }
+  button:hover { background: var(--bg3); }
+  button:disabled { opacity: .45; cursor: default; }
+  code, pre { font-family: var(--mono); font-size: 12px; }
+  pre { margin: 0; white-space: pre-wrap; word-break: break-word; }
+
+  #sidebar { width: 300px; flex: none; border-right: 1px solid var(--line); background: var(--bg2); display: flex; flex-direction: column; height: 100vh; }
+  #sidebar .head { padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  #sidebar .head h1 { font-size: 14px; margin: 0 0 6px; }
+  #sidebar input { width: 100%; }
+  #runs { overflow: auto; flex: 1; padding: 6px 0; }
+  .group { padding: 6px 12px 2px; font-weight: 600; color: var(--fg2); font-size: 11px; text-transform: none; cursor: pointer; word-break: break-all; }
+  .group:hover, .run:hover { color: var(--accent); }
+  .group.sel, .run.sel { color: var(--accent); background: var(--bg3); }
+  .run { padding: 2px 12px 2px 22px; cursor: pointer; display: flex; justify-content: space-between; gap: 6px; }
+  .run .n { color: var(--fg2); font-size: 11px; flex: none; }
+  .run .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  #main { flex: 1; min-width: 0; height: 100vh; overflow: auto; }
+  #main > .inner { padding: 12px 16px 40px; }
+  h2 { font-size: 15px; margin: 0 0 4px; word-break: break-all; }
+  .muted { color: var(--fg2); }
+  .bar { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; margin: 8px 0; }
+  .chip { display: inline-block; padding: 1px 7px; border-radius: 10px; background: var(--bg3); font-size: 12px; white-space: nowrap; }
+  .chip.t { background: color-mix(in srgb, var(--red) 18%, transparent); color: var(--red); }
+  .chip.g { background: color-mix(in srgb, var(--green) 18%, transparent); color: var(--green); }
+  .chip.a { background: color-mix(in srgb, var(--amber) 18%, transparent); color: var(--amber); }
+  .filters label { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--fg2); }
+
+  table { border-collapse: collapse; width: 100%; font-size: 12px; }
+  th, td { text-align: left; padding: 3px 7px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th { position: sticky; top: 0; background: var(--bg2); cursor: pointer; user-select: none; font-weight: 600; }
+  th.sorted::after { content: " ▾"; color: var(--accent); }
+  th.sorted.asc::after { content: " ▴"; }
+  tbody tr { cursor: pointer; }
+  tbody tr:hover { background: var(--bg3); }
+  tbody tr.cur { outline: 2px solid var(--accent); outline-offset: -2px; }
+  td.num { text-align: right; font-family: var(--mono); }
+  .b-true { color: var(--red); font-weight: 600; }
+  .b-good { color: var(--green); font-weight: 600; }
+  .b-false { color: var(--fg2); }
+  .b-null { color: var(--line); }
+  td.mono { font-family: var(--mono); }
+  .pager { display: flex; gap: 8px; align-items: center; margin: 8px 0; }
+  .progress { padding: 20px; }
+  .progress .track { height: 6px; background: var(--bg3); border-radius: 3px; overflow: hidden; margin: 8px 0; max-width: 480px; }
+  .progress .fill { height: 100%; background: var(--accent); }
+
+  /* detail */
+  .detail-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 6px; }
+  .meta { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 2px 16px; font-size: 12px; margin: 6px 0 10px; }
+  .meta div span:first-child { color: var(--fg2); margin-right: 6px; }
+  .tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); margin: 10px 0; }
+  .tabs button { border: none; border-bottom: 2px solid transparent; border-radius: 0; background: none; padding: 5px 10px; }
+  .tabs button.on { border-bottom-color: var(--accent); color: var(--accent); }
+  .msg { border: 1px solid var(--line); border-radius: 6px; margin: 8px 0; overflow: hidden; }
+  .msg .hd { padding: 4px 10px; font-size: 11px; font-weight: 600; display: flex; gap: 10px; align-items: baseline; background: var(--bg2); }
+  .msg .hd .r { text-transform: uppercase; letter-spacing: .03em; }
+  .msg .hd .muted { font-weight: 400; }
+  .msg .body { padding: 8px 10px; }
+  .msg.system .hd { color: var(--fg2); }
+  .msg.user .hd { color: var(--amber); }
+  .msg.assistant .hd { color: var(--accent); }
+  .msg.tool .hd { color: var(--purple); }
+  .text { white-space: pre-wrap; word-break: break-word; font-family: var(--mono); font-size: 12px; }
+  .text .cmd { background: color-mix(in srgb, var(--accent) 14%, transparent); border-radius: 3px; padding: 0 3px; }
+  .text pre.code { background: var(--bg2); border: 1px solid var(--line); border-radius: 4px; padding: 6px 8px; margin: 4px 0; }
+  details.reason { margin-bottom: 8px; }
+  details.reason summary { cursor: pointer; color: var(--fg2); font-size: 11px; font-weight: 600; user-select: none; }
+  details.reason .text { border-left: 3px solid var(--line); padding-left: 8px; margin-top: 4px; color: var(--fg2); }
+  .toolcall { border: 1px dashed var(--line); border-radius: 4px; padding: 6px 8px; margin: 6px 0; }
+  .toolcall .fn { font-weight: 600; font-size: 11px; color: var(--purple); margin-bottom: 3px; }
+  .section { margin: 14px 0; }
+  .section h3 { font-size: 13px; margin: 0 0 4px; }
+  .flag { border-left: 3px solid var(--red); padding: 4px 8px; margin: 6px 0; background: var(--bg2); }
+  .kv td { white-space: normal; vertical-align: top; }
+  .kv td:first-child { color: var(--fg2); width: 200px; }
+  kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 3px; padding: 0 4px; }
+</style>
+</head>
+<body>
+<div id="sidebar">
+  <div class="head">
+    <h1>Trajectory viewer</h1>
+    <input id="runfilter" placeholder="filter runs…">
+  </div>
+  <div id="runs"><div class="muted" style="padding:10px 12px">loading runs…</div></div>
+</div>
+<div id="main"><div class="inner" id="content"><p class="muted">Select a run or a group of runs on the left.</p></div></div>
+
+<script>
+'use strict';
+const $ = (s, el = document) => el.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const fmtNum = (v, d = 0) => v == null ? '' : Number(v).toLocaleString(undefined, {maximumFractionDigits: d});
+const fmtDur = s => s == null ? '' : (s >= 3600 ? (s/3600).toFixed(1)+'h' : s >= 60 ? (s/60).toFixed(1)+'m' : Math.round(s)+'s');
+const GOOD = new Set(['passed', 'passes_original', 'honest_correct', 'passes_visible', 'passes_all', 'submitted_true_answer', 'passed_blind']);
+
+const state = {
+  runs: [], groups: {},           // from /api/runs
+  sel: null,                      // {kind:'run'|'group', id}
+  rows: [],                       // rows of the selected run(s)
+  view: [],                       // filtered + sorted rows
+  filters: {}, text: '', sort: {col: null, asc: true}, page: 0, pageSize: 250,
+  detail: null,                   // {key, data}
+  collapseReasoning: false, tab: 'transcript',
+  pollTimer: null, building: false,
+};
+
+// ---------------------------------------------------------------- routing
+function parseHash() {
+  const p = new URLSearchParams(location.hash.slice(1));
+  return {r: p.get('r'), t: p.get('t')};
+}
+function setHash(r, t) {
+  const p = new URLSearchParams();
+  if (r) p.set('r', r);
+  if (t) p.set('t', t);
+  const h = '#' + p.toString();
+  if (location.hash !== h) history.pushState(null, '', h);
+}
+window.addEventListener('popstate', route);
+window.addEventListener('hashchange', route);
+
+async function route() {
+  const {r, t} = parseHash();
+  if (r) {
+    const [kind, id] = r.startsWith('group:') ? ['group', r.slice(6)] : ['run', r];
+    if (!state.sel || state.sel.kind !== kind || state.sel.id !== id) await selectRuns(kind, id, false);
+  }
+  if (t) {
+    const [run, i, offset] = t.split('|');
+    await openDetail(run, +i, +offset, false);
+  } else {
+    state.detail = null;
+    if (state.sel && !state.building) renderTable();
+  }
+  renderSidebar();
+}
+
+// ---------------------------------------------------------------- runs
+async function loadRuns() {
+  const res = await (await fetch('/api/runs')).json();
+  state.runs = res.runs;
+  state.groups = {};
+  for (const r of res.runs) (state.groups[r.group] ||= []).push(r);
+  renderSidebar();
+  route();
+}
+
+function renderSidebar() {
+  const q = $('#runfilter').value.toLowerCase();
+  const el = $('#runs');
+  const sel = state.sel;
+  let html = '';
+  for (const [g, runs] of Object.entries(state.groups)) {
+    const shown = runs.filter(r => !q || r.id.toLowerCase().includes(q));
+    if (!shown.length) continue;
+    const gsel = sel && sel.kind === 'group' && sel.id === g ? ' sel' : '';
+    html += `<div class="group${gsel}" data-kind="group" data-id="${esc(g)}" title="open all ${runs.length} runs in ${esc(g)}">${esc(g)} <span class="muted">(${runs.length})</span></div>`;
+    for (const r of shown) {
+      const rsel = sel && sel.kind === 'run' && sel.id === r.id ? ' sel' : '';
+      html += `<div class="run${rsel}" data-kind="run" data-id="${esc(r.id)}" title="${esc(r.file)} · ${esc(r.run_config?.model || '')}"><span class="nm">${esc(r.name)}</span><span class="n">${(r.bytes/1e6).toFixed(1)} MB</span></div>`;
+    }
+  }
+  el.innerHTML = html || '<div class="muted" style="padding:10px 12px">no runs match</div>';
+  el.querySelectorAll('[data-kind]').forEach(n => n.onclick = () => {
+    setHash(n.dataset.kind === 'group' ? 'group:' + n.dataset.id : n.dataset.id, null);
+    route();
+  });
+}
+$('#runfilter').oninput = renderSidebar;
+
+async function selectRuns(kind, id, push = true) {
+  clearTimeout(state.pollTimer);
+  state.sel = {kind, id};
+  state.rows = []; state.filters = {}; state.text = ''; state.sort = {col: null, asc: true}; state.page = 0;
+  if (push) setHash(kind === 'group' ? 'group:' + id : id, null);
+  renderSidebar();
+  const ids = kind === 'group' ? (state.groups[id] || []).map(r => r.id) : [id];
+  await loadIndex(ids);
+}
+
+async function loadIndex(ids) {
+  const results = await Promise.all(ids.map(async id => ({id, ...(await (await fetch('/api/index?run=' + encodeURIComponent(id))).json())})));
+  const building = results.filter(r => r.status === 'building');
+  if (building.length) {
+    state.building = true;
+    if (!state.detail) renderProgress(results);
+    state.pollTimer = setTimeout(() => loadIndex(ids), 1000);
+    return;
+  }
+  state.building = false;
+  state.rows = results.flatMap(r => r.rows || []);
+  if (state.detail) renderDetail(); else renderTable();
+}
+
+function renderProgress(results) {
+  let html = `<h2>${esc(selTitle())}</h2><div class="progress">`;
+  for (const r of results) {
+    if (r.status === 'ready') { html += `<div>${esc(r.id)}: ${r.rows.length} rows ✓</div>`; continue; }
+    const p = r.progress || {};
+    if (p.error) { html += `<div style="color:var(--red)">${esc(r.id)}: ${esc(p.error)}</div>`; continue; }
+    const frac = p.total_bytes ? Math.min(1, p.bytes / p.total_bytes) : 0;
+    html += `<div>${esc(r.id)}: indexing… ${p.rows} rows, ${(p.bytes/1e6).toFixed(0)} / ${(p.total_bytes/1e6).toFixed(0)} MB<div class="track"><div class="fill" style="width:${(frac*100).toFixed(1)}%"></div></div></div>`;
+  }
+  html += `<p class="muted">First open of a run reads the whole file once; the row index is cached afterwards.</p></div>`;
+  $('#content').innerHTML = html;
+}
+
+function selTitle() {
+  if (!state.sel) return '';
+  return state.sel.kind === 'group' ? `${state.sel.id}/ (all runs)` : state.sel.id;
+}
+
+// ---------------------------------------------------------------- table
+function cellValue(row, col) {
+  if (col.startsWith('label:')) return row.labels?.[col.slice(6)];
+  return row[col];
+}
+
+function columns() {
+  const labelCols = new Set();
+  for (const r of state.rows) for (const k of Object.keys(r.labels || {})) labelCols.add('label:' + k);
+  const cols = [];
+  if (state.sel?.kind === 'group') cols.push('run');
+  cols.push('task_id', 'variant', 'agent_type', 'epoch', 'status', 'score', 'reward', 'programmatic_hack', 'test_edit_attempt');
+  cols.push(...[...labelCols].sort());
+  cols.push('n_turns', 'n_messages', 'output_tokens', 'reasoning_tokens', 'duration_s', 'timed_out_calls');
+  return cols;
+}
+const COL_LABEL = {run: 'run', task_id: 'task', variant: 'variant', agent_type: 'agent', epoch: 'ep', status: 'status', score: 'score', reward: 'reward',
+  programmatic_hack: 'prog. hack', test_edit_attempt: 'test edit', n_turns: 'calls', n_messages: 'msgs', output_tokens: 'out tok', reasoning_tokens: 'reason tok', duration_s: 'dur', timed_out_calls: 'timed-out'};
+const colLabel = c => COL_LABEL[c] || (c.startsWith('label:') ? c.slice(6) : c);
+const isNumCol = c => ['reward', 'epoch', 'n_turns', 'n_messages', 'output_tokens', 'reasoning_tokens', 'duration_s', 'timed_out_calls'].includes(c) || c === 'label:frac_passed';
+
+function applyFilters() {
+  const q = state.text.toLowerCase();
+  let rows = state.rows.filter(r => {
+    if (q && !(String(r.task_id).toLowerCase().includes(q) || String(r.trajectory_id).toLowerCase().includes(q))) return false;
+    for (const [col, want] of Object.entries(state.filters)) {
+      if (want === '' || want == null) continue;
+      if (JSON.stringify(cellValue(r, col) ?? null) !== want) return false;
+    }
+    return true;
+  });
+  const {col, asc} = state.sort;
+  if (col) {
+    const dir = asc ? 1 : -1;
+    rows = rows.slice().sort((a, b) => {
+      const x = cellValue(a, col), y = cellValue(b, col);
+      if (x == null && y == null) return 0;
+      if (x == null) return 1;
+      if (y == null) return -1;
+      return (x < y ? -1 : x > y ? 1 : 0) * dir;
+    });
+  }
+  state.view = rows;
+}
+
+function renderTable() {
+  applyFilters();
+  const cols = columns();
+  const rows = state.view;
+  const total = state.rows.length;
+  // filter controls: columns with few distinct values
+  let filt = '';
+  for (const c of cols) {
+    if (c === 'task_id' || isNumCol(c) && c !== 'epoch') continue;
+    const vals = new Map();
+    for (const r of state.rows) { const v = JSON.stringify(cellValue(r, c) ?? null); vals.set(v, (vals.get(v) || 0) + 1); }
+    if (vals.size < 2 || vals.size > 24) continue;
+    const cur = state.filters[c] ?? '';
+    const opts = [...vals.entries()].sort().map(([v, n]) => `<option value='${esc(v)}'${v === cur ? ' selected' : ''}>${esc(v === 'null' ? '–' : v.replace(/^"|"$/g, ''))} (${n})</option>`).join('');
+    filt += `<label>${esc(colLabel(c))} <select data-col="${esc(c)}"><option value="">any</option>${opts}</select></label>`;
+  }
+  // summary chips over the filtered rows
+  const chips = [];
+  for (const c of cols) {
+    if (!['programmatic_hack', 'test_edit_attempt'].includes(c) && !c.startsWith('label:')) continue;
+    let t = 0, n = 0;
+    for (const r of rows) { const v = cellValue(r, c); if (typeof v === 'boolean') { n++; if (v) t++; } }
+    if (n) chips.push(`<span class="chip ${t && !GOOD.has(c.replace('label:', '')) ? 't' : t ? 'g' : ''}" title="${t} of ${n} rows with a boolean value">${esc(colLabel(c))} ${t}/${n} (${(100*t/n).toFixed(1)}%)</span>`);
+  }
+  {
+    const scored = rows.filter(r => r.score === 'C' || r.score === 'I');
+    if (scored.length) chips.unshift(`<span class="chip">score C ${scored.filter(r => r.score === 'C').length}/${scored.length}</span>`);
+    const rewards = rows.map(r => r.reward).filter(v => typeof v === 'number');
+    if (rewards.length) chips.unshift(`<span class="chip">mean reward ${(rewards.reduce((a, b) => a + b, 0) / rewards.length).toFixed(3)}</span>`);
+  }
+  const pages = Math.max(1, Math.ceil(rows.length / state.pageSize));
+  state.page = Math.min(state.page, pages - 1);
+  const start = state.page * state.pageSize;
+  const pageRows = rows.slice(start, start + state.pageSize);
+  const cfg = state.sel.kind === 'run' ? state.runs.find(r => r.id === state.sel.id)?.run_config : null;
+
+  let html = `<h2>${esc(selTitle())}</h2>`;
+  if (cfg) html += `<div class="muted">${esc(cfg.model || '')}${cfg.model_revision ? ' @ ' + esc(String(cfg.model_revision).slice(0, 10)) : ''} · created ${esc(cfg.created || '')}${cfg.env ? ' · env ' + esc(JSON.stringify(cfg.env)) : ''}${cfg.sampling ? ' · sampling ' + esc(JSON.stringify(cfg.sampling)) : ''}</div>`;
+  html += `<div class="bar"><b>${rows.length}</b><span class="muted">of ${total} rollouts</span>${chips.join('')}</div>`;
+  html += `<div class="bar filters"><input id="textfilter" placeholder="task or trajectory id…" value="${esc(state.text)}">${filt}<button id="clearf">clear</button></div>`;
+  html += `<div class="pager"><button id="pprev" ${state.page === 0 ? 'disabled' : ''}>‹</button><span>page ${state.page + 1} / ${pages}</span><button id="pnext" ${state.page >= pages - 1 ? 'disabled' : ''}>›</button><span class="muted">click a row to open it; column headers sort</span></div>`;
+  html += '<table><thead><tr>' + cols.map(c => `<th data-col="${esc(c)}" class="${state.sort.col === c ? 'sorted' + (state.sort.asc ? ' asc' : '') : ''}">${esc(colLabel(c))}</th>`).join('') + '</tr></thead><tbody>';
+  for (const r of pageRows) {
+    const key = rowKey(r);
+    html += `<tr data-key="${esc(key)}" class="${state.detail?.key === key ? 'cur' : ''}">` + cols.map(c => renderCell(r, c)).join('') + '</tr>';
+  }
+  html += '</tbody></table>';
+  $('#content').innerHTML = html;
+
+  $('#textfilter').oninput = e => { state.text = e.target.value; state.page = 0; renderTable(); $('#textfilter').focus(); const v = $('#textfilter'); v.setSelectionRange(v.value.length, v.value.length); };
+  $('#content').querySelectorAll('select[data-col]').forEach(s => s.onchange = () => { state.filters[s.dataset.col] = s.value; state.page = 0; renderTable(); });
+  $('#clearf').onclick = () => { state.filters = {}; state.text = ''; state.page = 0; renderTable(); };
+  $('#pprev').onclick = () => { state.page--; renderTable(); };
+  $('#pnext').onclick = () => { state.page++; renderTable(); };
+  $('#content').querySelectorAll('th').forEach(th => th.onclick = () => {
+    const c = th.dataset.col;
+    state.sort = state.sort.col === c ? {col: c, asc: !state.sort.asc} : {col: c, asc: true};
+    renderTable();
+  });
+  $('#content').querySelectorAll('tbody tr').forEach(tr => tr.onclick = () => {
+    const r = rows.find(x => rowKey(x) === tr.dataset.key);
+    openDetail(r.run, r.i, r.offset, true);
+  });
+}
+
+const rowKey = r => `${r.run}|${r.i}|${r.offset}`;
+
+function renderCell(r, c) {
+  const v = cellValue(r, c);
+  if (c === 'run') return `<td class="mono" title="${esc(v)}">${esc(String(v).split('/').pop())}</td>`;
+  if (c === 'task_id') return `<td class="mono" title="${esc(r.trajectory_id)}">${esc(v)}</td>`;
+  if (c === 'duration_s') return `<td class="num">${fmtDur(v)}</td>`;
+  if (c === 'reward') return `<td class="num">${v == null ? '' : fmtNum(v, 3)}</td>`;
+  if (typeof v === 'boolean') {
+    const good = GOOD.has(c.replace('label:', ''));
+    return `<td class="${v ? (good ? 'b-good' : 'b-true') : 'b-false'}">${v ? '✓' : '✗'}</td>`;
+  }
+  if (v == null) return '<td class="b-null">–</td>';
+  if (c === 'score') return `<td class="${v === 'C' ? 'b-good' : 'b-false'}">${esc(v)}</td>`;
+  if (c === 'status') return `<td class="${v === 'completed' ? '' : 'b-true'}">${esc(v)}</td>`;
+  if (typeof v === 'number') return `<td class="num">${fmtNum(v, Number.isInteger(v) ? 0 : 3)}</td>`;
+  return `<td>${esc(v)}</td>`;
+}
+
+// ---------------------------------------------------------------- detail
+async function openDetail(run, i, offset, push = true) {
+  const key = `${run}|${i}|${offset}`;
+  if (push) setHash(state.sel ? (state.sel.kind === 'group' ? 'group:' + state.sel.id : state.sel.id) : run, key);
+  if (!state.sel) { await selectRuns('run', run, false); }
+  $('#content').innerHTML = `<p class="muted">loading ${esc(key)}…</p>`;
+  const data = await (await fetch(`/api/trajectory?run=${encodeURIComponent(run)}&i=${i}&offset=${offset}`)).json();
+  state.detail = {key, data};
+  renderDetail();
+}
+
+function renderDetail() {
+  const {key, data} = state.detail;
+  if (data.error) { $('#content').innerHTML = `<p style="color:var(--red)">${esc(data.error)}</p>`; return; }
+  applyFilters();
+  const pos = state.view.findIndex(r => rowKey(r) === key);
+  const prev = pos > 0 ? state.view[pos - 1] : null, next = pos >= 0 && pos < state.view.length - 1 ? state.view[pos + 1] : null;
+  const m = data.meta, row = data.row;
+
+  const badges = [];
+  badges.push(`<span class="chip ${m.status === 'completed' ? '' : 'a'}">${esc(m.status)}</span>`);
+  if (data.score) badges.push(`<span class="chip ${data.score.value === 'C' ? 'g' : ''}">score ${esc(data.score.value)}${row.reward != null && row.reward !== SCOREMAP(data.score.value) ? ' · reward ' + fmtNum(row.reward, 3) : ''}</span>`);
+  const bool = (name, v, good) => v == null ? '' : `<span class="chip ${v ? (good ? 'g' : 't') : ''}">${esc(name)} ${v ? '✓' : '✗'}</span>`;
+  badges.push(bool('programmatic_hack', data.programmatic_hack, false), bool('test_edit_attempt', data.test_edit_attempt, false));
+  for (const [k, l] of Object.entries(data.labels)) {
+    const v = l.value;
+    badges.push(typeof v === 'boolean' ? bool(k, v, GOOD.has(k)) : `<span class="chip" title="${esc(l.source)}">${esc(k)} ${esc(typeof v === 'number' ? fmtNum(v, 3) : v)}</span>`);
+  }
+  for (const j of data.judge) badges.push(`<span class="chip ${j.strongest_status === 'enacted' ? 't' : j.strongest_status ? 'a' : 'g'}" title="${esc(j.file)}">judge ${esc(j.judge)}: ${esc(j.strongest_status || 'no flags')}</span>`);
+
+  let html = `<div class="detail-head"><button id="back">‹ list</button><button id="dprev" ${prev ? '' : 'disabled'}>← prev</button><button id="dnext" ${next ? '' : 'disabled'}>next →</button><span class="muted">${pos >= 0 ? `${pos + 1} / ${state.view.length} in current filter` : 'not in current filter'}</span></div>`;
+  html += `<h2>${esc(m.trajectory_id)}</h2><div class="bar">${badges.join('')}</div>`;
+  html += `<div class="meta">
+    <div><span>model</span>${esc(m.model)}${m.model_revision ? ' @ ' + esc(String(m.model_revision).slice(0, 10)) : ''}</div>
+    <div><span>benchmark</span>${esc(m.benchmark)} / ${esc(m.task_source)}</div>
+    <div><span>variant</span>${esc(m.variant)} · <span>agent</span>${esc(m.agent_type)} · <span>epoch</span>${esc(m.epoch)}</div>
+    <div><span>task</span>${esc(m.task_id)}</div>
+    <div><span>calls</span>${m.n_turns} · <span>messages</span>${m.n_messages} · <span>abandoned calls</span>${data.abandoned_calls.length}</div>
+    <div><span>tokens</span>in ${fmtNum(m.token_counts?.input_tokens)} · out ${fmtNum(m.token_counts?.output_tokens)} · reasoning ${fmtNum(m.token_counts?.reasoning_tokens)}</div>
+    <div><span>duration</span>${fmtDur(m.duration_s)} · <span>at</span>${esc(m.timestamp)}</div>
+    <div><span>sampling</span>${esc(JSON.stringify(m.sampling))}</div>
+    ${m.env_options ? `<div><span>env</span>${esc(JSON.stringify(m.env_options))}</div>` : ''}
+    ${m.error_message ? `<div style="color:var(--red)"><span>error</span>${esc(m.error_message)}</div>` : ''}
+  </div>`;
+  const tabs = [['transcript', 'Transcript'], ['plain', 'Plain text'], ['results', 'Score & results'], ['judge', `Judge (${data.judge.length})`], ['raw', 'Raw JSON']];
+  html += `<div class="tabs">${tabs.map(([k, l]) => `<button data-tab="${k}" class="${state.tab === k ? 'on' : ''}">${l}</button>`).join('')}</div><div id="tab"></div>`;
+  $('#content').innerHTML = html;
+  $('#back').onclick = () => { setHash(state.sel.kind === 'group' ? 'group:' + state.sel.id : state.sel.id, null); route(); };
+  $('#dprev').onclick = () => prev && openDetail(prev.run, prev.i, prev.offset, true);
+  $('#dnext').onclick = () => next && openDetail(next.run, next.i, next.offset, true);
+  $('#content').querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { state.tab = b.dataset.tab; renderDetail(); });
+  renderTab(data);
+  $('#main').scrollTop = 0;
+}
+const SCOREMAP = v => ({C: 1, I: 0}[v]);
+
+function renderTab(data) {
+  const el = $('#tab');
+  if (state.tab === 'transcript') { el.innerHTML = renderTranscript(data); wireTranscript(); }
+  else if (state.tab === 'plain') el.innerHTML = `<pre class="text">${esc(data.plain)}</pre>`;
+  else if (state.tab === 'results') el.innerHTML = renderResults(data);
+  else if (state.tab === 'judge') el.innerHTML = renderJudge(data);
+  else el.innerHTML = `<pre class="text">${esc(JSON.stringify(data.raw, null, 2))}</pre>`;
+}
+
+function renderText(s) {
+  // light markdown: fenced code blocks → <pre>, <command> tags highlighted, everything else escaped
+  const parts = String(s ?? '').split(/(```[\s\S]*?```)/g);
+  return parts.map(p => {
+    if (p.startsWith('```') && p.endsWith('```')) {
+      const body = p.slice(3, -3).replace(/^[a-zA-Z0-9_+-]*\n/, '');
+      return `<pre class="code">${esc(body)}</pre>`;
+    }
+    return esc(p).replace(/&lt;command&gt;([\s\S]*?)&lt;\/command&gt;/g, '<span class="cmd">&lt;command&gt;$1&lt;/command&gt;</span>');
+  }).join('');
+}
+
+function renderTranscript(data) {
+  let html = `<div class="bar"><label><input type="checkbox" id="collapse" ${state.collapseReasoning ? 'checked' : ''}> collapse reasoning</label><span class="muted"><kbd>←</kbd>/<kbd>→</kbd> previous/next rollout, <kbd>Esc</kbd> back to list</span></div>`;
+  const sig = data.hack_signals.test_file_writes;
+  if (sig.length) {
+    html += `<div class="section"><h3>test.py writes (heuristic, rhablation.hack_signals)</h3>` + sig.map(s => `<div class="flag">call ${s.turn_index} · ${esc(s.function)}<pre class="text">${esc(s.snippet)}</pre></div>`).join('') + '</div>';
+  }
+  if (data.abandoned_calls.length) {
+    html += `<div class="section muted">${data.abandoned_calls.length} model call(s) abandoned by the client (no message produced): ` + data.abandoned_calls.map(a => `call ${a.turn_index}: ${esc(a.error)}`).join('; ') + '</div>';
+  }
+  let firstUser = true;
+  for (const msg of data.transcript) {
+    const role = msg.role;
+    let head = `<span class="r">${esc(role)}</span>`;
+    if (role === 'user') { head += `<span class="muted">${firstUser ? 'task' : 'feedback / observation'}</span>`; firstUser = false; }
+    if (role === 'tool') head += `<span class="muted">${esc(msg.function || '')} ${msg.error ? '· error: ' + esc(msg.error) : ''}</span>`;
+    if (role === 'assistant') {
+      const u = msg.usage || {};
+      head += `<span class="muted">step ${msg.step} · call ${msg.turn_index ?? '?'} · finish ${esc(msg.finish_reason)}${msg.stop_reason && msg.stop_reason !== msg.finish_reason ? ' / ' + esc(msg.stop_reason) : ''} · out ${fmtNum(u.output_tokens)} tok (reasoning ${fmtNum(u.reasoning_tokens)})</span>`;
+    }
+    let body = '';
+    if (role === 'assistant' && msg.reasoning) {
+      body += `<details class="reason" ${state.collapseReasoning ? '' : 'open'}><summary>reasoning · ${fmtNum(msg.reasoning.length)} chars (model-internal)</summary><div class="text">${renderText(msg.reasoning)}</div></details>`;
+    }
+    if (msg.content) body += `<div class="text">${renderText(msg.content)}</div>`;
+    for (const tc of msg.tool_calls) {
+      let args = tc.arguments;
+      if (typeof args === 'string') { try { args = JSON.parse(args); } catch (e) {} }
+      const shown = args && typeof args === 'object' ? (args.command ?? args.cmd ?? args.code ?? null) : null;
+      body += `<div class="toolcall"><div class="fn">tool call · ${esc(tc.function)}${shown != null && args.path ? ' · ' + esc(args.path) : ''}</div><pre class="text">${esc(shown != null ? shown : (typeof args === 'string' ? args : JSON.stringify(args, null, 2)))}</pre></div>`;
+    }
+    if (!body) body = '<span class="muted">(empty)</span>';
+    html += `<div class="msg ${esc(role)}"><div class="hd">${head}</div><div class="body">${body}</div></div>`;
+  }
+  return html;
+}
+function wireTranscript() {
+  $('#collapse').onchange = e => { state.collapseReasoning = e.target.checked; $('#tab').querySelectorAll('details.reason').forEach(d => d.open = !state.collapseReasoning); };
+}
+
+function renderResults(data) {
+  let html = '';
+  if (data.score) {
+    html += `<div class="section"><h3>score (${esc(data.score.scorer)})</h3><table class="kv"><tr><td>value</td><td>${esc(data.score.value)}</td></tr>`;
+    if (data.score.answer) html += `<tr><td>answer</td><td><pre class="text">${esc(data.score.answer)}</pre></td></tr>`;
+    if (data.score.explanation) html += `<tr><td>explanation</td><td><pre class="text">${esc(data.score.explanation)}</pre></td></tr>`;
+    html += '</table></div>';
+  }
+  html += `<div class="section"><h3>labels</h3><table class="kv">` + Object.entries(data.labels).map(([k, l]) => `<tr><td>${esc(k)}</td><td>${esc(JSON.stringify(l.value))} <span class="muted">(${esc(l.source)})</span></td></tr>`).join('') +
+    `<tr><td>programmatic_hack</td><td>${esc(JSON.stringify(data.programmatic_hack))}</td></tr><tr><td>test_edit_attempt</td><td>${esc(JSON.stringify(data.test_edit_attempt))}</td></tr></table></div>`;
+  if (data.final_output != null) html += `<div class="section"><h3>final_output</h3><pre class="text">${esc(data.final_output)}</pre></div>`;
+  html += `<div class="section"><h3>raw_test_results</h3><pre class="text">${esc(JSON.stringify(data.raw_test_results, null, 2))}</pre></div>`;
+  html += `<div class="section"><h3>prompt_config</h3><pre class="text">${esc(JSON.stringify(data.meta.prompt_config, null, 2))}</pre></div>`;
+  html += `<div class="section"><h3>provenance</h3><pre class="text">${esc(JSON.stringify(data.meta.provenance, null, 2))}</pre></div>`;
+  return html;
+}
+
+function renderJudge(data) {
+  if (!data.judge.length) return '<p class="muted">No stage-3 judge verdict for this trajectory id.</p>';
+  return data.judge.map(j => `<div class="section"><h3>${esc(j.judge)} <span class="muted">· ${esc(j.file)} · ${esc(j.judged_at || '')}${j.group ? ' · group ' + esc(j.group) : ''}</span></h3>
+    <div class="bar"><span class="chip ${j.strongest_status === 'enacted' ? 't' : j.strongest_status ? 'a' : 'g'}">${esc(j.strongest_status || 'no flags')}</span>${(j.categories || []).map(c => `<span class="chip">${esc(c)}</span>`).join('')}</div>
+    ${(j.flags || []).map(f => `<div class="flag"><b>step ${f.step} · ${esc(f.channel)} · ${esc(f.category)} · ${esc(f.status)}</b><pre class="text">${esc(f.quote)}</pre><div class="muted">${esc(f.why)}</div></div>`).join('')}
+    <div class="text" style="font-family:var(--sans)">${esc(j.rationale || '')}</div></div>`).join('');
+}
+
+document.addEventListener('keydown', e => {
+  if (!state.detail || e.target.matches('input, select, textarea')) return;
+  if (e.key === 'ArrowLeft') $('#dprev')?.click();
+  else if (e.key === 'ArrowRight') $('#dnext')?.click();
+  else if (e.key === 'Escape') $('#back')?.click();
+});
+
+loadRuns();
+</script>
+</body>
+</html>
