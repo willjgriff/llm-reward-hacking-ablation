@@ -2,7 +2,9 @@
 
 Pure functions plus one small in-memory/on-disk index store. Served by scripts/trajectory_viewer.py.
 Reads trajectories.jsonl[.gz] (schema 1.0-1.3, full or compact) without touching any run directory:
-the row index is cached under a separate cache dir, keyed by file path, size and mtime.
+the row index is cached under a separate cache dir, keyed by file path, size and mtime. Extra roots
+in the ortho layout (`<root>/inspect/<env>/<log>.jsonl`, records of Ethan's `envs/convert.py`) are
+read through `rhablation.ortho_records`, one file per run.
 """
 
 import gzip
@@ -15,27 +17,37 @@ from typing import Any, BinaryIO, Iterator
 
 from rhablation.hack_signals import test_file_writes
 from rhablation.judge_transcript import _turns_by_message, render as render_plain
+from rhablation.ortho_records import is_ortho_record, normalize, with_rendered_system_turn
 
 # Candidate files per run directory, first match wins (a compacted copy is a lossless duplicate).
+# `records.jsonl[.gz]` is a run written in the ortho record format (sweep/benchmarks/ortho_grader).
 TRAJ_FILE_NAMES = (
     "trajectories.jsonl",
     "trajectories.jsonl.gz",
     "trajectories.compact.jsonl",
     "trajectories.compact.jsonl.gz",
+    "records.jsonl",
+    "records.jsonl.gz",
 )
+RUN_FILE_GLOBS = ("trajectories*.jsonl*", "records.jsonl*")
 TOKEN_FIELDS = ("prompt_token_ids", "completion_token_ids")
 SCORE_TO_REWARD = {"C": 1.0, "I": 0.0}
+# Second layout (Ethan's ortho repo): <extra root>/inspect/<env>/<inspect log name>.jsonl, one file = one run.
+ORTHO_SUBDIR = "inspect"
+
+ExtraRoots = dict[str, Path]  # name -> directory; run ids under it are "<name>/<relative path>"
 
 
 # ---------------------------------------------------------------------------------------------
 # Discovery
 
 
-def discover_runs(data_root: Path) -> list[dict[str, Any]]:
-    """Every directory under data_root holding a trajectories file, sorted by relative path."""
+def discover_runs(data_root: Path, extra_roots: ExtraRoots | None = None) -> list[dict[str, Any]]:
+    """Every directory under data_root holding a trajectories file, sorted by relative path, followed by
+    every ortho-layout file under each extra root."""
     runs: list[dict[str, Any]] = []
     seen: set[Path] = set()
-    for p in sorted(data_root.rglob("trajectories*.jsonl*")):
+    for p in sorted(q for g in RUN_FILE_GLOBS for q in data_root.rglob(g)):
         if p.name not in TRAJ_FILE_NAMES or p.parent in seen:
             continue
         run_dir = p.parent
@@ -52,7 +64,52 @@ def discover_runs(data_root: Path) -> list[dict[str, Any]]:
                 "run_config": _run_config_summary(run_dir / "run_config.json"),
             }
         )
+    for name, root in (extra_roots or {}).items():
+        runs.extend(_discover_ortho(name, root))
     return runs
+
+
+def _discover_ortho(name: str, root: Path) -> list[dict[str, Any]]:
+    base = root / ORTHO_SUBDIR
+    if not base.is_dir():
+        return []
+    runs = []
+    for p in sorted(base.glob("*/*.jsonl")):
+        rel = p.relative_to(root).as_posix()
+        runs.append(
+            {
+                "id": f"{name}/{rel}",
+                "group": f"{name}/{p.parent.relative_to(root).as_posix()}",
+                "name": p.stem,
+                "file": p.name,
+                "bytes": p.stat().st_size,
+                "run_config": _ortho_config_summary(p),
+            }
+        )
+    return runs
+
+
+def _ortho_config_summary(path: Path) -> dict[str, Any] | None:
+    """From the first record: the run's model, env, config and condition (ortho has no run_config.json)."""
+    try:
+        with path.open("rb") as f:
+            rec = json.loads(f.readline())
+    except (OSError, ValueError):
+        return None
+    cfg = rec.get("cfg") or {}
+    return {
+        "run_id": rec.get("rollout_id", "").split("/")[0] or None,
+        "created": None,
+        "model": rec.get("model"),
+        "model_revision": None,
+        "benchmark": "ortho",
+        "env": {k: rec.get(k) for k in ("env", "config_id", "condition") if k in rec},
+        "splits": None,
+        "agent_types": None,
+        "samples_per_task": cfg.get("n"),
+        "sampling": {k: v for k, v in cfg.items() if v is not None and k in ("family", "system", "prompts", "seed", "lora", "add_vector", "add_layers", "add_alpha", "add_scaling", "ablate_vector", "ablate_layers", "ablate_row")} or None,
+        "impossible_variants": None,
+    }
 
 
 def _run_config_summary(path: Path) -> dict[str, Any] | None:
@@ -78,7 +135,16 @@ def _run_config_summary(path: Path) -> dict[str, Any] | None:
     }
 
 
-def run_file(data_root: Path, run_id: str) -> Path:
+def run_file(data_root: Path, run_id: str, extra_roots: ExtraRoots | None = None) -> Path:
+    """The trajectories file of a run id: a run dir under data_root, or "<name>/inspect/<env>/<file>.jsonl"
+    under the extra root called <name> (an ortho-layout file is its own run)."""
+    head, _, rest = run_id.partition("/")
+    if extra_roots and head in extra_roots and rest.startswith(ORTHO_SUBDIR + "/"):
+        root = extra_roots[head].resolve()
+        p = (root / rest).resolve()
+        if root not in p.parents or p.suffix != ".jsonl" or not p.is_file():
+            raise FileNotFoundError(f"no ortho rollout file for {run_id}")
+        return p
     run_dir = (data_root / run_id).resolve()
     if data_root.resolve() not in run_dir.parents:
         raise ValueError(f"run outside data root: {run_id}")
@@ -159,6 +225,7 @@ def load_record(path: Path, index: int, offset: int) -> dict[str, Any]:
 
 def summarize_record(rec: dict[str, Any]) -> dict[str, Any]:
     """The per-rollout row shown in the table. Every hack signal stays its own column."""
+    rec = normalize(rec)
     rt = rec.get("raw_test_results") or {}
     labels = {k: (v or {}).get("value") for k, v in (rec.get("labels") or {}).items()}
     score = (rec.get("score") or {}).get("value")
@@ -197,9 +264,10 @@ def summarize_record(rec: dict[str, Any]) -> dict[str, Any]:
 class IndexStore:
     """Builds and caches one row index per run file. Builds run in a background thread."""
 
-    def __init__(self, data_root: Path, cache_dir: Path):
+    def __init__(self, data_root: Path, cache_dir: Path, extra_roots: ExtraRoots | None = None):
         self.data_root = data_root
         self.cache_dir = cache_dir
+        self.extra_roots = extra_roots or {}
         self._lock = threading.Lock()
         self._ready: dict[str, list[dict[str, Any]]] = {}
         self._progress: dict[str, dict[str, Any]] = {}
@@ -209,7 +277,7 @@ class IndexStore:
 
     def get(self, run_id: str) -> dict[str, Any]:
         """{'status': 'ready', 'rows': [...]} or {'status': 'building', 'progress': {...}}."""
-        path = run_file(self.data_root, run_id)
+        path = run_file(self.data_root, run_id, self.extra_roots)
         with self._lock:
             if run_id in self._ready:
                 return {"status": "ready", "rows": self._ready[run_id]}
@@ -310,6 +378,7 @@ def structure_transcript(rec: dict[str, Any]) -> list[dict[str, Any]]:
             "tool_calls": m.get("tool_calls") or [],
             "function": m.get("function"),
             "error": m.get("error"),
+            "rendered": bool(m.get("rendered")),
         }
         if m.get("role") == "assistant":
             step += 1
@@ -329,8 +398,13 @@ def structure_transcript(rec: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def strip_bulk(rec: dict[str, Any]) -> dict[str, Any]:
-    """The record without token ids and rendered strings, for the raw-JSON tab."""
+    """The record without token ids and rendered strings, for the raw-JSON tab. An ortho record is shown as
+    stored (its own keys), minus `ids` and `items`."""
     out = dict(rec)
+    if "ids" in out and "items" in out:
+        out["ids"] = f"<{len(rec.get('ids') or [])} ids omitted>" if rec.get("ids") is not None else None
+        out["items"] = f"<{len(rec.get('items') or [])} messages omitted; see the transcript tab>"
+        return out
     out["rendered_text"] = f"<{len(rec.get('rendered_text') or [])} entries omitted>"
     out["turns"] = [
         {k: (f"<{len(v)} ids omitted>" if k in TOKEN_FIELDS and v is not None else v) for k, v in t.items() if k != "rendered_prompt"}
@@ -339,7 +413,34 @@ def strip_bulk(rec: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+_TOKENIZERS: dict[str, Any] = {}
+
+
+def _decoder(model: str | None):
+    """A token-id decoder for the record's model (the vLLM served name, `vllm/` prefix stripped), loaded
+    once from the local HF cache; None when transformers or the tokenizer files are unavailable. Only used
+    to recover the chat template's own system turn from ortho records, which store the sent messages."""
+    if not model:
+        return None
+    name = model.removeprefix("vllm/")
+    if name not in _TOKENIZERS:
+        try:
+            from transformers import AutoTokenizer
+
+            tok = AutoTokenizer.from_pretrained(name)
+            _TOKENIZERS[name] = lambda ids: tok.decode(ids, skip_special_tokens=False)
+        except Exception:  # offline, no cache, or no transformers: the transcript just lacks the system turn
+            _TOKENIZERS[name] = None
+    return _TOKENIZERS[name]
+
+
 def detail(rec: dict[str, Any], judge: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
+    raw = rec
+    rec = normalize(rec)
+    if is_ortho_record(raw):
+        decode = _decoder(raw.get("model"))
+        if decode is not None:
+            rec = with_rendered_system_turn(rec, raw, decode)
     turns = rec.get("turns") or []
     try:
         plain = render_plain(rec)
@@ -369,5 +470,5 @@ def detail(rec: dict[str, Any], judge: dict[str, list[dict[str, Any]]]) -> dict[
         "hack_signals": {"test_file_writes": test_file_writes(turns)},
         "judge": judge.get(rec.get("trajectory_id"), []),
         "plain": plain,
-        "raw": strip_bulk(rec),
+        "raw": strip_bulk(raw),
     }

@@ -456,6 +456,7 @@ function renderTranscript(data) {
   for (const msg of data.transcript) {
     const role = msg.role;
     let head = `<span class="r">${esc(role)}</span>`;
+    if (role === 'system' && msg.rendered) head += `<span class="muted">as rendered by the chat template (decoded from the stored token ids; the template adds its reasoning-effort instruction)</span>`;
     if (role === 'user') { head += `<span class="muted">${firstUser ? 'task' : 'feedback / observation'}</span>`; firstUser = false; }
     if (role === 'tool') head += `<span class="muted">${esc(msg.function || '')} ${msg.error ? '· error: ' + esc(msg.error) : ''}</span>`;
     if (role === 'assistant') {

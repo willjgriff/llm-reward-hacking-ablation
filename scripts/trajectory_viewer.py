@@ -1,12 +1,14 @@
 #!/usr/bin/env python
 """Local web UI for browsing saved trajectories.
 
-    uv run scripts/trajectory_viewer.py [--data-root data] [--port 8765]
+    uv run scripts/trajectory_viewer.py [--data-root data] [--port 8765] [--extra-root ortho=../ortho/data]
 
 Then open http://127.0.0.1:8765. Lists every run directory under the data root that holds a
 trajectories.jsonl[.gz] (stage1 runs, sweep chunks, ...), shows one row per rollout with score,
 reward and every hack signal as its own column, and opens the full transcript (chain of thought,
-tool calls, observations, scorer output, stage-3 judge verdicts) on click.
+tool calls, observations, scorer output, stage-3 judge verdicts) on click. An --extra-root in the
+ortho layout (Ethan's repo: <root>/inspect/<env>/<log>.jsonl) adds each of those files as a run
+under "<name>/inspect/<env>", read through rhablation.ortho_records.
 
 Read-only: nothing is written inside a run directory. The per-run row index is cached under
 --cache-dir (default data/.viewer_cache), keyed by file size and mtime. Binds 127.0.0.1 only.
@@ -25,6 +27,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from rhablation import viewer  # noqa: E402
 
 STATIC = Path(__file__).resolve().parents[1] / "src" / "rhablation" / "viewer_static" / "index.html"
+
+
+def parse_extra_root(spec: str) -> tuple[str, Path]:
+    name, sep, path = spec.partition("=")
+    if not sep or not name or "/" in name or not path:
+        raise argparse.ArgumentTypeError(f"expected NAME=PATH with a slash-free name, got {spec!r}")
+    p = Path(path).resolve()
+    if not p.is_dir():
+        raise argparse.ArgumentTypeError(f"extra root not found: {p}")
+    return name, p
 
 
 def make_handler(data_root: Path, store: viewer.IndexStore, judge: dict) -> type[BaseHTTPRequestHandler]:
@@ -51,11 +63,11 @@ def make_handler(data_root: Path, store: viewer.IndexStore, judge: dict) -> type
                 if url.path == "/" or url.path == "/index.html":
                     self._send(HTTPStatus.OK, STATIC.read_bytes(), "text/html; charset=utf-8")
                 elif url.path == "/api/runs":
-                    self._json({"data_root": str(data_root), "runs": viewer.discover_runs(data_root)})
+                    self._json({"data_root": str(data_root), "extra_roots": {k: str(v) for k, v in store.extra_roots.items()}, "runs": viewer.discover_runs(data_root, store.extra_roots)})
                 elif url.path == "/api/index":
                     self._json(store.get(q["run"]))
                 elif url.path == "/api/trajectory":
-                    path = viewer.run_file(data_root, q["run"])
+                    path = viewer.run_file(data_root, q["run"], store.extra_roots)
                     rec = viewer.load_record(path, int(q["i"]), int(q.get("offset", -1)))
                     self._json(viewer.detail(rec, judge))
                 else:
@@ -72,16 +84,20 @@ def main() -> None:
     parser.add_argument("--cache-dir", type=Path, default=None, help="row-index cache (default: <data-root>/.viewer_cache)")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--extra-root", type=parse_extra_root, action="append", default=[], metavar="NAME=PATH",
+                        help="a directory in the ortho layout (<PATH>/inspect/<env>/*.jsonl); repeatable")
     args = parser.parse_args()
 
     data_root = args.data_root.resolve()
     if not data_root.is_dir():
         sys.exit(f"data root not found: {data_root}")
+    extra_roots = dict(args.extra_root)
     cache_dir = (args.cache_dir or data_root / ".viewer_cache").resolve()
-    store = viewer.IndexStore(data_root, cache_dir)
+    store = viewer.IndexStore(data_root, cache_dir, extra_roots)
     judge = viewer.load_judge_labels(data_root)
-    runs = viewer.discover_runs(data_root)
-    print(f"{len(runs)} runs under {data_root}; judge verdicts for {len(judge)} trajectories; cache in {cache_dir}")
+    runs = viewer.discover_runs(data_root, extra_roots)
+    extra = "".join(f"; {sum(r['id'].startswith(k + '/') for r in runs)} ortho files under {k}={v}" for k, v in extra_roots.items())
+    print(f"{len(runs)} runs under {data_root}{extra}; judge verdicts for {len(judge)} trajectories; cache in {cache_dir}")
 
     server = ThreadingHTTPServer((args.host, args.port), make_handler(data_root, store, judge))
     print(f"serving on http://{args.host}:{args.port}  (Ctrl-C to stop)")
