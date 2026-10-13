@@ -16,10 +16,16 @@ Target model: `Qwen/Qwen3.8-27B`, bf16, chat template at `reasoning_effort="low"
 |---|---|---|---|
 | 1-2 harness + rollouts | done, 11,257 rollouts | done, 3,816 rollouts | done, hack rate ≈ 0, abandoned |
 | 3 labelling | programmatic only (env oracle) | programmatic + hand audit of 23 hacks | programmatic + heuristics |
-| 4 directions | done | not started | - |
-| 5 ablation (steering test, then weight edit) | done, one direction works | - | - |
-| 6 evals (held-out hack rate, honest pass, MMLU) | done for one checkpoint, 200 episodes | - | - |
-| 7 repeat / compare (second environment, DPO baseline) | cross-variant transfer tested (none); DPO not started | - | - |
+| 4 directions | done | done (2026-10-02, later the same day): `aware_vs_honest` / `answer_mean` L36 is a detector (AUROC 0.96), not a hack direction | - |
+| 5 ablation (steering test, then weight edit) | done, one direction works | projecting the MBPP direction out raises honest NLL as much as hack NLL (+0.042 vs +0.045); no weight edit | - |
+| 6 evals (held-out hack rate, honest pass, MMLU) | done for one checkpoint, 200 episodes | R1 on held-out MBPP: 24.3% hacks vs base 20.2% (no transfer) | - |
+| 7 repeat / compare (second environment, DPO baseline) | cross-variant transfer tested (none); DPO not started | cross-environment transfer both ways: none (cosine ≤ 0.1) | - |
+
+*Update 2026-10-08:* the MBPP column reflects the stage 4/5 mission that ran on 2026-10-02 after this
+document was first written (details in the `CLAUDE.md` design log and HF `stage4/mbpp27b-full`,
+`stage5/mbpp27b`, `stage6/{base,R1}/s5d_*_mbpp`). Next: stage 5e, a 28-row matrix of (contrast × token
+position × method / window) on the TerminalVerifier data (`sweep/mission_stage5e.md`), orthogonalization
+and steering only, no DPO in that round.
 
 ## 3. Data collected
 
@@ -114,11 +120,10 @@ Generalization (the roadmap's main question):
 - One direction covering all tampering routes: refit the first direction on data that contains the rewrite routes (R1's collection has them; base data is 94% `sed`), ablate the base with it, compare with R1. This is the "propensity vs behaviours" question directly.
 - Hard-but-possible tasks (solve rate < 10%) as a more sensitive honest control and as the mentor's preferred realistic setting.
 
-Second direction, MBPP variant (stage 4 not started):
-- Decide what counts as the hack: this data is test-fitting by re-interpretation, not special-casing (4 of 3,816). If the roadmap wants special-casing, this data does not have it.
-- Filter by task, not rollout: drop `bool_negated` (755 hacks remain) or hand-read its 115 tasks; run the monitor over the rest.
-- Choose the contrast: all data (largely between-task) vs the 140 mixed tasks (same-prompt pairs). Then the per-layer cosine against the TerminalVerifier direction.
-- Truncation: 8% of rollouts think to the 8,192-token cap on 100-token tasks; a 16k cap would recover most.
+Second direction, MBPP variant (stage 4/5 done 2026-10-02, negative on every axis):
+- `aware_vs_honest` / `answer_mean` L36 separates held-out hacks (AUROC 0.96, 48/48 same-prompt pairs) but projecting it out raises honest MBPP and honest TerminalVerifier answers almost as much as hack answers: the honest mean already sits at 5.8 along the unit direction against 11.4 for hacks (in TerminalVerifier the negatives sat at 2.2). Open method question: a mean-centred projection (remove only the excess over the honest mean), which is not what heretic does; it is one of the stage-5e rows.
+- Orthogonal to the TerminalVerifier directions (cosine ≤ 0.1); no transfer either way; R1 on held-out MBPP 24.3% hacks vs base 20.2%.
+- This data is test-fitting by re-interpretation, not special-casing (4 of 3,816); `bool_negated` excluded (54% false positives).
 
 The original research axes:
 - Sample efficiency: 400 per class already converged, `attempt_vs_A` was stable from n=50 in the subset analysis. A behavioural test at 50-100 examples would make this a result rather than a probe statistic.

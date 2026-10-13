@@ -4,6 +4,7 @@ One YAML file (configs/stage4_*.yaml) drives the three stage-4 scripts: manifest
 directions. Everything the box needs to reproduce a run is in this file plus the manifest it writes.
 """
 
+import re
 from pathlib import Path
 from typing import Any, Literal
 
@@ -11,9 +12,23 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 # Aggregations the cache builder can compute from one forward pass over a trajectory (see stage4_masks).
-CACHED_AGGREGATIONS = ("cot_mean", "answer_mean", "prompt_last", "completion_last")
+CACHED_AGGREGATIONS = ("cot_mean", "answer_mean", "prompt_last", "completion_last", "cot_last", "answer_first", "action_mean", "full_mean")
+# Per-call slots: `call<k>_prompt_last` / `call<k>_answer_first` hold the position of call k alone (zeros when
+# the trajectory has fewer calls). Analysis-time contrasts with `unit: call` read them through the virtual
+# aggregation names in CALL_AGGREGATIONS.
+PER_CALL_POSITIONS = ("prompt_last", "answer_first")
+CALL_AGGREGATION_RE = re.compile(r"^call(\d+)_(prompt_last|answer_first)$")
+CALL_AGGREGATIONS = ("decision_prompt_last", "decision_answer_first")
 # Derived at analysis time from cached aggregations and the manifest's token counts.
 DERIVED_AGGREGATIONS = ("completion_mean",)
+
+
+def per_call_aggregations(max_calls: int, positions: tuple[str, ...] = PER_CALL_POSITIONS) -> list[str]:
+    return [f"call{k}_{p}" for p in positions for k in range(max_calls)]
+
+
+def is_cacheable_aggregation(name: str) -> bool:
+    return name in CACHED_AGGREGATIONS or CALL_AGGREGATION_RE.match(name) is not None
 
 
 class StrictModel(BaseModel):
@@ -29,6 +44,9 @@ class ClassRule(StrictModel):
     programmatic_hack: bool | None = None
     passed: bool | None = None
     tampered: bool | None = None
+    # Which call of a rollout of this class is its "decision call" (unit: call contrasts): `write` = the first
+    # call whose command writes the verifier file, `final` = the last call, `none` = no decision call.
+    decision: Literal["write", "final", "none"] = "none"
 
 
 class DataConfig(StrictModel):
@@ -45,6 +63,9 @@ class OrderConfig(StrictModel):
     priority_classes: list[str] = Field(description="Round-robin over these first; remaining classes follow")
     subset_per_class: int = 400
     seed: int = 0
+    # Drop rows outside the balanced subset from the manifest (after the task split, which still uses every
+    # row), so the cache arrays are sized for the subset only.
+    keep_only_subset: bool = False
 
 
 class CacheConfig(StrictModel):
@@ -62,9 +83,9 @@ class CacheConfig(StrictModel):
 
     @model_validator(mode="after")
     def _known_aggregations(self) -> "CacheConfig":
-        unknown = set(self.aggregations) - set(CACHED_AGGREGATIONS)
+        unknown = [a for a in self.aggregations if not is_cacheable_aggregation(a)]
         if unknown:
-            raise ValueError(f"unknown cache aggregations {sorted(unknown)}; cached ones are {CACHED_AGGREGATIONS}")
+            raise ValueError(f"unknown cache aggregations {sorted(unknown)}; cached ones are {CACHED_AGGREGATIONS} and call<k>_{{prompt_last,answer_first}}")
         return self
 
 
@@ -74,6 +95,16 @@ class ContrastSpec(StrictModel):
     positive_max_turns: int | None = None
     negative_max_turns: int | None = None
     description: str = ""
+    # `paired`: direction = mean over tasks having rows on both sides of (mean of positives − mean of
+    # negatives of that task); class means are then task-balanced. `none`: plain difference of class means.
+    pairing: Literal["none", "paired"] = "none"
+    # `call`: one unit per model call instead of per trajectory, read from the per-call cache slots; the
+    # positive side uses each row's decision call, the negative side every call with index >= min_call_index
+    # (or its decision call when negative_calls is `decision`).
+    unit: Literal["trajectory", "call"] = "trajectory"
+    positive_calls: Literal["decision", "all"] = "decision"
+    negative_calls: Literal["decision", "all"] = "all"
+    min_call_index: int = 1
 
 
 class AnalysisConfig(StrictModel):
@@ -97,7 +128,7 @@ class AnalysisConfig(StrictModel):
 
     @model_validator(mode="after")
     def _known(self) -> "AnalysisConfig":
-        allowed = set(CACHED_AGGREGATIONS) | set(DERIVED_AGGREGATIONS)
+        allowed = set(CACHED_AGGREGATIONS) | set(DERIVED_AGGREGATIONS) | set(CALL_AGGREGATIONS)
         unknown = set(self.aggregations) - allowed
         if unknown:
             raise ValueError(f"unknown analysis aggregations {sorted(unknown)}")
@@ -133,10 +164,15 @@ class Stage4Config(StrictModel):
         for c in self.order.priority_classes:
             if c not in names:
                 raise ValueError(f"priority class {c!r} is not a defined class")
+        decision_of = {c.name: c.decision for c in self.classes}
         for cname, spec in self.analysis.contrasts.items():
             for c in spec.positive + spec.negative:
                 if c not in names:
                     raise ValueError(f"contrast {cname}: class {c!r} is not defined")
+            if spec.unit == "call":
+                for side, classes_, mode in (("positive", spec.positive, spec.positive_calls), ("negative", spec.negative, spec.negative_calls)):
+                    if mode == "decision" and any(decision_of[c] == "none" for c in classes_):
+                        raise ValueError(f"contrast {cname}: {side} side uses decision calls but a class has decision: none")
         return self
 
 

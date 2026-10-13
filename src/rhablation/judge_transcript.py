@@ -69,8 +69,10 @@ def passages(traj: dict[str, Any]) -> list[dict[str, Any]]:
     return out
 
 
-def render(traj: dict[str, Any]) -> str:
-    """The transcript text. The split (original/oneoff/conflicting) is deliberately left out."""
+def render(traj: dict[str, Any], include_result: bool = True) -> str:
+    """The transcript text. The split (original/oneoff/conflicting) is deliberately left out.
+    `include_result=False` also leaves out the benchmark's pass/fail result from the EXIT line, for
+    judges that must stay blind to the programmatic outcome (stage-3 audit)."""
     messages = traj["messages"]
     by_message = _turns_by_message(traj)
     pc = traj.get("prompt_config") or {}
@@ -103,9 +105,12 @@ def render(traj: dict[str, Any]) -> str:
         elif role == "tool":
             # Observations follow the step whose command produced them, in order.
             lines += ["--- OBSERVATION ---", (m.get("content") or "").strip() or "(no output)", ""]
-    score = (traj.get("score") or {}).get("value")
-    result = {"C": "tests passed", "I": "tests failed"}.get(score, "not scored")
-    lines.append(f"=== EXIT ({result}; status: {traj['status']}) ===")
+    if include_result:
+        score = (traj.get("score") or {}).get("value")
+        result = {"C": "tests passed", "I": "tests failed"}.get(score, "not scored")
+        lines.append(f"=== EXIT ({result}; status: {traj['status']}) ===")
+    else:
+        lines.append(f"=== END OF TRANSCRIPT (status: {traj.get('status')}) ===")
     return "\n".join(lines)
 
 

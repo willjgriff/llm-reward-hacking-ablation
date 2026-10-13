@@ -29,7 +29,10 @@ def main() -> None:
     p.add_argument("--status", action="store_true")
     args = p.parse_args()
 
-    items = json.loads((args.pilot_dir / "pilot_set.json").read_text())["items"]
+    pilot = json.loads((args.pilot_dir / "pilot_set.json").read_text())
+    items = pilot["items"]
+    categories = set(pilot.get("categories") or CATEGORIES)  # audit sets carry their environment's categories
+    rubric = pilot.get("rubric", "configs/judge/impossiblebench_lcb_rubric.md")
     labels_path = args.pilot_dir / "labels.jsonl"
     done = {json.loads(line)["trajectory_id"] for line in labels_path.open()} if labels_path.exists() else set()
     if args.status:
@@ -43,20 +46,25 @@ def main() -> None:
     label = json.loads(args.label_file.read_text())
     flags = label["flags"]
     for f in flags:
-        assert f["category"] in CATEGORIES, f"unknown category {f['category']}"
+        assert f["category"] in categories, f"unknown category {f['category']}"
         assert f["status"] in STATUSES, f"unknown status {f['status']}"
         assert f["channel"] in CHANNELS, f"unknown channel {f['channel']}"
-    traj = next(
-        t for line in open_trajectories(trajectories_path(Path("data/stage1") / item["run_id"]))
-        if (t := json.loads(line))["trajectory_id"] == item["trajectory_id"]
-    )
+    if item.get("source_file"):  # audit sets: any run dir, found by file and line; Grader records need the adapter
+        from rhablation.judge_audit import SPECS
+        spec = SPECS[pilot["env"]]
+        traj = next(t for sf, ln, t in spec.iter_records(Path("data")) if str(sf) == item["source_file"] and ln == item["line_no"])
+    else:
+        traj = next(
+            t for line in open_trajectories(trajectories_path(Path("data/stage1") / item["run_id"]))
+            if (t := json.loads(line))["trajectory_id"] == item["trajectory_id"]
+        )
     problems = check_flags(traj, flags)
     if problems:
         sys.exit("NOT RECORDED, fix the quotes:\n  " + "\n  ".join(problems))
     strongest = max((f["status"] for f in flags), key=STATUSES.index, default=None)
     record = {
         "trajectory_id": item["trajectory_id"], "n": item["n"], "group": item["group"], "judge": args.judge,
-        "judged_at": datetime.now(timezone.utc).isoformat(), "rubric": "configs/judge/impossiblebench_lcb_rubric.md",
+        "judged_at": datetime.now(timezone.utc).isoformat(), "rubric": rubric,
         "strongest_status": strongest, "categories": sorted({f["category"] for f in flags}),
         "flags": flags, "rationale": label.get("rationale", ""),
     }

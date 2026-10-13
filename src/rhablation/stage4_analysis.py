@@ -26,6 +26,24 @@ def diff_of_means(x_pos: np.ndarray, x_neg: np.ndarray, winsor_q: float | None =
     return mp - mn, mp, mn
 
 
+def paired_diff_of_means(
+    x_pos: np.ndarray, g_pos: np.ndarray, x_neg: np.ndarray, g_neg: np.ndarray, winsor_q: float | None = None
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, int]:
+    """Within-group paired difference: over groups (tasks) present on both sides, mean of (mean_pos_g − mean_neg_g).
+
+    Returns (direction, mean_pos, mean_neg, n_groups) with the means task-balanced (mean over groups of the
+    per-group means), so direction = mean_pos − mean_neg still holds. Groups on one side only are ignored."""
+    x_pos = winsorize(x_pos.astype(np.float32), winsor_q)
+    x_neg = winsorize(x_neg.astype(np.float32), winsor_q)
+    groups = sorted(set(g_pos) & set(g_neg))
+    if not groups:
+        h = x_pos.shape[1]
+        return np.zeros(h, np.float32), np.zeros(h, np.float32), np.zeros(h, np.float32), 0
+    mp = np.stack([x_pos[g_pos == g].mean(axis=0) for g in groups]).mean(axis=0)
+    mn = np.stack([x_neg[g_neg == g].mean(axis=0) for g in groups]).mean(axis=0)
+    return mp - mn, mp, mn, len(groups)
+
+
 def unit(v: np.ndarray) -> np.ndarray:
     n = np.linalg.norm(v)
     return v / n if n > 0 else v
@@ -72,7 +90,9 @@ def eval_probe(probe, x: np.ndarray, y: np.ndarray) -> dict[str, float]:
     return {"auc": auroc(p, y), "balanced_accuracy": float(balanced_accuracy_score(y, (p > 0).astype(int)))}
 
 
-def split_half_cosine(x_pos: np.ndarray, g_pos: np.ndarray, x_neg: np.ndarray, g_neg: np.ndarray, reps: int, seed: int, winsor_q=None) -> np.ndarray:
+def split_half_cosine(
+    x_pos: np.ndarray, g_pos: np.ndarray, x_neg: np.ndarray, g_neg: np.ndarray, reps: int, seed: int, winsor_q=None, paired: bool = False
+) -> np.ndarray:
     """Cosine between directions from two disjoint halves of the (task-)groups, `reps` random halvings."""
     rng = np.random.default_rng(seed)
     groups = np.array(sorted(set(g_pos) | set(g_neg)))
@@ -84,8 +104,12 @@ def split_half_cosine(x_pos: np.ndarray, g_pos: np.ndarray, x_neg: np.ndarray, g
         if a_pos.sum() < 2 or (~a_pos).sum() < 2 or a_neg.sum() < 2 or (~a_neg).sum() < 2:
             out.append(float("nan"))
             continue
-        d1, _, _ = diff_of_means(x_pos[a_pos], x_neg[a_neg], winsor_q)
-        d2, _, _ = diff_of_means(x_pos[~a_pos], x_neg[~a_neg], winsor_q)
+        if paired:
+            d1 = paired_diff_of_means(x_pos[a_pos], g_pos[a_pos], x_neg[a_neg], g_neg[a_neg], winsor_q)[0]
+            d2 = paired_diff_of_means(x_pos[~a_pos], g_pos[~a_pos], x_neg[~a_neg], g_neg[~a_neg], winsor_q)[0]
+        else:
+            d1, _, _ = diff_of_means(x_pos[a_pos], x_neg[a_neg], winsor_q)
+            d2, _, _ = diff_of_means(x_pos[~a_pos], x_neg[~a_neg], winsor_q)
         out.append(cosine(d1, d2))
     return np.array(out)
 
