@@ -1,11 +1,11 @@
 """Compact storage of trajectories (schema 1.2) and transparent reading of trajectories.jsonl[.gz].
 
-Every model call's prompt repeats the previous call's prompt almost entirely, and the rendered strings
+Every model call's prompty repeats the previous call's prompt almost entirely, and the rendered strings
 are `tokenizer.decode` of the stored token ids, so a full record is ~90% repetition. The compact form
 stores each prompt as (length of the prefix shared with the previous call's prompt, remaining ids) and
 drops `rendered_prompt` / `rendered_text`. `expand_trajectory` restores the full record exactly; call it
 before using `prompt_token_ids`. It is a no-op on full records, so readers can call it unconditionally.
-"""
+""" 
 
 import gzip
 from pathlib import Path
