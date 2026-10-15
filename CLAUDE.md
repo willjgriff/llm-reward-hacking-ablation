@@ -146,7 +146,7 @@ Each step is a separate script (or set of scripts) that reads the previous step'
 - Larger models.
 
 ## Conventions
-- **Never commit to git.** The user makes all commits. Leave changes in the working tree.
+- **Never commit to main.** Work on a branch off `claude`, merge it into `claude` and push `claude`; the user merges `claude` into `main`.
 - Each stage is a separate script; stages communicate only via files on disk.
 - Config via file or CLI args; no hardcoded paths, models, or dataset sizes.
 - Always run on a tiny subset (5–10 tasks) and show results before any full run.
