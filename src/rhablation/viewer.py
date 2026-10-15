@@ -58,7 +58,7 @@ def discover_runs(data_root: Path, extra_roots: ExtraRoots | None = None) -> lis
         runs.append(
             {
                 "id": rel,
-                "group": (group := run_dir.parent.relative_to(data_root).as_posix()),
+                "group": (group := group_of(run_dir.relative_to(data_root))),
                 "collection": collection_of(group),
                 "name": run_dir.name,
                 "file": chosen.name,
@@ -90,6 +90,20 @@ def _discover_ortho(name: str, root: Path) -> list[dict[str, Any]]:
             }
         )
     return runs
+
+
+def group_of(rel: Path) -> str:
+    """Sidebar group of a run dir (relative to the data root): its parent path, except under stage6/, whose layout
+    is stage6/<checkpoint>/<run> (stages 5b-5e, run names s5b_..s5e_) or stage6/<checkpoint>/rhenvs/<run> (stage 7).
+    There the group is stage6/<mission>/<checkpoint>, so one mission's checkpoints share a collection."""
+    parts = rel.parts
+    if len(parts) >= 3 and parts[0] == "stage6":
+        if parts[2] == "rhenvs":
+            return f"stage6/stage7/{parts[1]}"
+        m = re.match(r"s(5[a-z])_", parts[-1])
+        if m:
+            return f"stage6/stage{m[1]}/{parts[1]}"
+    return rel.parent.as_posix()
 
 
 def collection_of(group: str) -> str:
