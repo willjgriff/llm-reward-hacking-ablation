@@ -33,6 +33,12 @@
   #sidebar .head h1 { font-size: 14px; margin: 0 0 6px; }
   #sidebar input { width: 100%; }
   #runs { overflow: auto; flex: 1; padding: 6px 0; }
+  #sidebar .opts { display: flex; gap: 6px; margin-top: 6px; }
+  #sidebar .opts select { flex: 1; min-width: 0; }
+  .coll { padding: 8px 12px 4px; font-weight: 700; font-size: 12px; cursor: pointer; display: flex; justify-content: space-between; gap: 6px; border-top: 1px solid var(--line); user-select: none; }
+  .coll:first-child { border-top: none; }
+  .coll:hover { color: var(--accent); }
+  .coll .n { color: var(--fg2); font-weight: 400; font-size: 11px; flex: none; }
   .group { padding: 6px 12px 2px; font-weight: 600; color: var(--fg2); font-size: 11px; text-transform: none; cursor: pointer; word-break: break-all; }
   .group:hover, .run:hover { color: var(--accent); }
   .group.sel, .run.sel { color: var(--accent); background: var(--bg3); }
@@ -107,6 +113,10 @@
   <div class="head">
     <h1>Trajectory viewer</h1>
     <input id="runfilter" placeholder="filter runs…">
+    <div class="opts">
+      <select id="collfilter" title="show one collection"></select>
+      <select id="collmode" title="how runs are grouped into collections"><option value="source">by source</option><option value="day">by day</option></select>
+    </div>
   </div>
   <div id="runs"><div class="muted" style="padding:10px 12px">loading runs…</div></div>
 </div>
@@ -129,7 +139,13 @@ const state = {
   detail: null,                   // {key, data}
   collapseReasoning: false, tab: 'transcript',
   pollTimer: null, building: false,
+  collMode: 'source', collShow: '', collapsed: {},  // sidebar collections, kept in localStorage
 };
+const PREFS_KEY = 'rhviewer.sidebar';
+try { Object.assign(state, JSON.parse(localStorage.getItem(PREFS_KEY) || '{}')); } catch (e) {}
+function savePrefs() {
+  try { localStorage.setItem(PREFS_KEY, JSON.stringify({collMode: state.collMode, collShow: state.collShow, collapsed: state.collapsed})); } catch (e) {}
+}
 
 // ---------------------------------------------------------------- routing
 function parseHash() {
@@ -172,19 +188,55 @@ async function loadRuns() {
   route();
 }
 
+// Collections: 'source' = the server's collection (parent path of the group, e.g. sweep/Qwen3.8-27B,
+// ortho/inspect); 'day' = the day the run was created (run_config.created, or the Inspect log name).
+const runDay = r => (r.run_config?.created || '').slice(0, 10) || 'undated';
+const collOf = r => state.collMode === 'day' ? runDay(r) : r.collection;
+function collections() {
+  const out = {};
+  for (const r of state.runs) ((out[collOf(r)] ||= {})[r.group] ||= []).push(r);
+  const keys = Object.keys(out);
+  if (state.collMode === 'day') keys.sort((a, b) => a === 'undated' ? 1 : b === 'undated' ? -1 : b.localeCompare(a));
+  return keys.map(k => [k, out[k]]);
+}
+function dayRange(runs) {
+  const days = runs.map(runDay).filter(d => d !== 'undated').sort();
+  if (!days.length) return '';
+  const [a, b] = [days[0].slice(5), days[days.length - 1].slice(5)];
+  return a === b ? a : `${a} – ${b}`;
+}
+
 function renderSidebar() {
   const q = $('#runfilter').value.toLowerCase();
   const el = $('#runs');
   const sel = state.sel;
+  const colls = collections();
+  if (state.collShow && !colls.some(([c]) => c === state.collShow)) state.collShow = '';
+  $('#collmode').value = state.collMode;
+  $('#collfilter').innerHTML = `<option value="">all collections</option>` + colls.map(([c, gs]) =>
+    `<option value="${esc(c)}"${c === state.collShow ? ' selected' : ''}>${esc(c)} (${Object.values(gs).flat().length})</option>`).join('');
   let html = '';
-  for (const [g, runs] of Object.entries(state.groups)) {
-    const shown = runs.filter(r => !q || r.id.toLowerCase().includes(q));
-    if (!shown.length) continue;
-    const gsel = sel && sel.kind === 'group' && sel.id === g ? ' sel' : '';
-    html += `<div class="group${gsel}" data-kind="group" data-id="${esc(g)}" title="open all ${runs.length} runs in ${esc(g)}">${esc(g)} <span class="muted">(${runs.length})</span></div>`;
-    for (const r of shown) {
-      const rsel = sel && sel.kind === 'run' && sel.id === r.id ? ' sel' : '';
-      html += `<div class="run${rsel}" data-kind="run" data-id="${esc(r.id)}" title="${esc(r.file)} · ${esc(r.run_config?.model || '')}"><span class="nm">${esc(r.name)}</span><span class="n">${(r.bytes/1e6).toFixed(1)} MB</span></div>`;
+  for (const [c, groups] of colls) {
+    if (state.collShow && c !== state.collShow) continue;
+    const all = Object.values(groups).flat();
+    const shownGroups = Object.entries(groups).map(([g, runs]) => [g, runs.filter(r => !q || r.id.toLowerCase().includes(q))]).filter(([, rs]) => rs.length);
+    if (!shownGroups.length) continue;
+    const ckey = state.collMode + ':' + c;
+    const hasSel = sel && all.some(r => sel.kind === 'run' ? r.id === sel.id : r.group === sel.id);
+    const open = q || state.collShow === c || !state.collapsed[ckey];
+    const meta = state.collMode === 'day' ? `${all.length} runs` : `${all.length} runs${dayRange(all) ? ' · ' + dayRange(all) : ''}`;
+    html += `<div class="coll" data-coll="${esc(ckey)}" title="click to ${open ? 'collapse' : 'expand'}"><span>${open ? '▾' : '▸'} ${esc(c)}${!open && hasSel ? ' •' : ''}</span><span class="n">${esc(meta)}</span></div>`;
+    if (!open) continue;
+    for (const [g, shown] of shownGroups) {
+      const n = state.groups[g].length;
+      const gsel = sel && sel.kind === 'group' && sel.id === g ? ' sel' : '';
+      // Inside a collection the common prefix is redundant; the full group id is in the tooltip.
+      const label = state.collMode === 'source' && g.startsWith(c + '/') ? g.slice(c.length + 1) : g;
+      html += `<div class="group${gsel}" data-kind="group" data-id="${esc(g)}" title="open all ${n} runs in ${esc(g)}">${esc(label)} <span class="muted">(${state.collMode === 'day' && shown.length !== n ? shown.length + ' of ' : ''}${n})</span></div>`;
+      for (const r of shown) {
+        const rsel = sel && sel.kind === 'run' && sel.id === r.id ? ' sel' : '';
+        html += `<div class="run${rsel}" data-kind="run" data-id="${esc(r.id)}" title="${esc(r.file)} · ${esc(r.run_config?.model || '')} · ${esc(r.run_config?.created || '')}"><span class="nm">${esc(r.name)}</span><span class="n">${(r.bytes/1e6).toFixed(1)} MB</span></div>`;
+      }
     }
   }
   el.innerHTML = html || '<div class="muted" style="padding:10px 12px">no runs match</div>';
@@ -192,8 +244,15 @@ function renderSidebar() {
     setHash(n.dataset.kind === 'group' ? 'group:' + n.dataset.id : n.dataset.id, null);
     route();
   });
+  el.querySelectorAll('[data-coll]').forEach(n => n.onclick = () => {
+    const k = n.dataset.coll;
+    if (state.collapsed[k]) delete state.collapsed[k]; else state.collapsed[k] = true;
+    savePrefs(); renderSidebar();
+  });
 }
 $('#runfilter').oninput = renderSidebar;
+$('#collfilter').onchange = e => { state.collShow = e.target.value; savePrefs(); renderSidebar(); };
+$('#collmode').onchange = e => { state.collMode = e.target.value; state.collShow = ''; savePrefs(); renderSidebar(); };
 
 async function selectRuns(kind, id, push = true) {
   clearTimeout(state.pollTimer);
