@@ -290,6 +290,36 @@ def summarize_record(rec: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def parse_find_query(text: str, run_ids: list[str]) -> tuple[list[str], list[str]]:
+    """Split pasted text into (runs to search, ids to find). Tokens are separated by whitespace or commas. A token
+    naming a run (its id, optionally with a leading `data/` and a trailing trajectories/records file name) scopes
+    the search to that run; every other token is an id. No run token = search every run."""
+    known = set(run_ids)
+    scope: list[str] = []
+    queries: list[str] = []
+    for tok in re.split(r"[\s,]+", text.strip()):
+        if not tok:
+            continue
+        cand = tok.strip("/")
+        head, _, last = cand.rpartition("/")
+        if last in TRAJ_FILE_NAMES:
+            cand = head
+        cand = cand.removeprefix("data/")
+        if cand in known:
+            if cand not in scope:
+                scope.append(cand)
+        elif tok not in queries:
+            queries.append(tok)
+    return scope, queries
+
+
+def row_matches(row: dict[str, Any], q: str) -> bool:
+    """A row matches its full trajectory id, any '/'-aligned tail of it (`eval_7919_253/2` for an ortho rollout id
+    `<log>/eval_7919_253/2`), or its task id."""
+    tid = str(row.get("trajectory_id") or "")
+    return tid == q or tid.endswith("/" + q) or str(row.get("task_id")) == q
+
+
 class IndexStore:
     """Builds and caches one row index per run file. Builds run in a background thread."""
 
@@ -300,6 +330,8 @@ class IndexStore:
         self._lock = threading.Lock()
         self._ready: dict[str, list[dict[str, Any]]] = {}
         self._progress: dict[str, dict[str, Any]] = {}
+        self._queue: list[tuple[str, Path]] = []  # runs waiting for the find worker
+        self._worker: threading.Thread | None = None
 
     def _cache_path(self, path: Path) -> Path:
         return self.cache_dir / (hashlib.sha1(str(path.resolve()).encode()).hexdigest() + ".json")
@@ -331,6 +363,55 @@ class IndexStore:
         if data.get("size") != st.st_size or data.get("mtime") != st.st_mtime:
             return None
         return data["rows"]
+
+    def find(self, text: str) -> dict[str, Any]:
+        """Rows matching each id in `text` (see `parse_find_query`), over the runs named in it or else every run.
+        Runs without an index are indexed one at a time in a background thread; `pending` counts them, so the
+        caller polls until it is 0."""
+        all_ids = [r["id"] for r in discover_runs(self.data_root, self.extra_roots)]
+        scope, queries = parse_find_query(text, all_ids)
+        matches: list[dict[str, Any]] = []
+        missing, failed = [], []
+        for run_id in scope or all_ids:
+            path = run_file(self.data_root, run_id, self.extra_roots)
+            with self._lock:
+                rows = self._ready.get(run_id)
+                if rows is None and (rows := self._load_cache(path)) is not None:
+                    self._ready[run_id] = rows
+                error = (self._progress.get(run_id) or {}).get("error")
+            if error:
+                failed.append(run_id)
+                continue
+            if rows is None:
+                missing.append((run_id, path))
+                continue
+            for q in queries:
+                matches.extend({"query": q, **r} for r in rows if row_matches(r, q))
+        if missing:
+            self._queue_builds(missing)
+        return {"queries": queries, "scope": scope, "matches": matches, "searched": len(scope or all_ids) - len(missing) - len(failed), "pending": len(missing), "failed": failed}
+
+    def _queue_builds(self, items: list[tuple[str, Path]]) -> None:
+        """Index runs sequentially in one worker thread (find over all runs must not start 200 builds at once)."""
+        with self._lock:
+            known = {r for r, _ in self._queue}
+            self._queue.extend(it for it in items if it[0] not in known and it[0] not in self._progress)
+            if self._worker is not None and self._worker.is_alive():
+                return
+            self._worker = threading.Thread(target=self._drain, daemon=True)
+            self._worker.start()
+
+    def _drain(self) -> None:
+        while True:
+            with self._lock:
+                if not self._queue:
+                    self._worker = None
+                    return
+                run_id, path = self._queue.pop(0)
+                if run_id in self._ready or run_id in self._progress:
+                    continue
+                self._progress[run_id] = {"rows": 0, "bytes": 0, "total_bytes": path.stat().st_size, "error": None}
+            self._build(run_id, path)
 
     def _build(self, run_id: str, path: Path) -> None:
         rows: list[dict[str, Any]] = []

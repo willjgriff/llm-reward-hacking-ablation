@@ -31,7 +31,9 @@
   #sidebar { width: 300px; flex: none; border-right: 1px solid var(--line); background: var(--bg2); display: flex; flex-direction: column; height: 100vh; }
   #sidebar .head { padding: 10px 12px; border-bottom: 1px solid var(--line); }
   #sidebar .head h1 { font-size: 14px; margin: 0 0 6px; }
-  #sidebar input { width: 100%; }
+  #sidebar input, #sidebar textarea { width: 100%; }
+  #findbox { font: 12px var(--mono); color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 3px 7px; resize: vertical; min-height: 26px; margin-bottom: 6px; display: block; }
+  .findq { margin: 12px 0 4px; font: 600 12px var(--mono); }
   #runs { overflow: auto; flex: 1; padding: 6px 0; }
   #sidebar .opts { display: flex; gap: 6px; margin-top: 6px; }
   #sidebar .opts select { flex: 1; min-width: 0; }
@@ -112,6 +114,7 @@
 <div id="sidebar">
   <div class="head">
     <h1>Trajectory viewer</h1>
+    <textarea id="findbox" rows="1" placeholder="paste trajectory id(s), Enter to open…" title="One or more ids (whitespace or comma separated): a full trajectory id, its tail such as eval_7919_253/2, or a task id. A run path in the paste (data/stage6/…/records.jsonl.gz) restricts the search to that run. Shift+Enter for a new line."></textarea>
     <input id="runfilter" placeholder="filter runs…">
     <div class="opts">
       <select id="collfilter" title="show one collection"></select>
@@ -138,7 +141,7 @@ const state = {
   filters: {}, text: '', sort: {col: null, asc: true}, page: 0, pageSize: 250,
   detail: null,                   // {key, data}
   collapseReasoning: false, tab: 'transcript',
-  pollTimer: null, building: false,
+  pollTimer: null, building: false, findTimer: null,
   collMode: 'source', collShow: '', collapsed: {},  // sidebar collections, kept in localStorage
 };
 const PREFS_KEY = 'rhviewer.sidebar';
@@ -150,7 +153,7 @@ function savePrefs() {
 // ---------------------------------------------------------------- routing
 function parseHash() {
   const p = new URLSearchParams(location.hash.slice(1));
-  return {r: p.get('r'), t: p.get('t')};
+  return {r: p.get('r'), t: p.get('t'), f: p.get('f')};
 }
 function setHash(r, t) {
   const p = new URLSearchParams();
@@ -163,7 +166,9 @@ window.addEventListener('popstate', route);
 window.addEventListener('hashchange', route);
 
 async function route() {
-  const {r, t} = parseHash();
+  const {r, t, f} = parseHash();
+  clearTimeout(state.findTimer);
+  if (f != null) { $('#findbox').value = f; await findIds(f); renderSidebar(); return; }
   if (r) {
     const [kind, id] = r.startsWith('group:') ? ['group', r.slice(6)] : ['run', r];
     if (!state.sel || state.sel.kind !== kind || state.sel.id !== id) await selectRuns(kind, id, false);
@@ -176,6 +181,55 @@ async function route() {
     if (state.sel && !state.building) renderTable();
   }
   renderSidebar();
+}
+
+// ---------------------------------------------------------------- find by id
+// The server searches every run's row index (or only the runs named in the paste), indexing missing runs one at a
+// time in the background; while `pending` > 0 the results page re-polls and fills in.
+$('#findbox').onkeydown = e => {
+  if (e.key !== 'Enter' || e.shiftKey) return;
+  e.preventDefault();
+  const text = e.target.value.trim();
+  if (!text) return;
+  const h = '#' + new URLSearchParams({f: text}).toString();
+  if (location.hash === h) route(); else { history.pushState(null, '', h); route(); }
+};
+
+async function findIds(text) {
+  state.detail = null;
+  const res = await (await fetch('/api/find?q=' + encodeURIComponent(text))).json();
+  if (parseHash().f !== text) return;  // navigated away meanwhile
+  if (res.error) { $('#content').innerHTML = `<p style="color:var(--red)">${esc(res.error)}</p>`; return; }
+  if (res.queries.length === 1 && res.matches.length === 1 && !res.pending) {
+    const m = res.matches[0];
+    history.replaceState(null, '', '#' + new URLSearchParams({r: m.run, t: rowKey(m)}).toString());
+    return route();
+  }
+  renderFind(res);
+  if (res.pending) state.findTimer = setTimeout(() => parseHash().f === text && findIds(text), 1500);
+}
+
+function renderFind(res) {
+  const inSel = m => state.sel && (state.sel.kind === 'run' ? m.run === state.sel.id : state.runs.find(r => r.id === m.run)?.group === state.sel.id);
+  let html = `<h2>Find ${res.queries.length} id${res.queries.length === 1 ? '' : 's'}</h2><div class="bar">`;
+  html += res.scope.length ? `<span class="chip">in ${esc(res.scope.join(', '))}</span>` : '<span class="chip">all runs</span>';
+  html += `<span class="muted">${res.matches.length} match${res.matches.length === 1 ? '' : 'es'} · searched ${res.searched} run${res.searched === 1 ? '' : 's'}</span>`;
+  if (res.pending) html += `<span class="chip a">indexing ${res.pending} more run${res.pending === 1 ? '' : 's'}… (first time only)</span>`;
+  if (res.failed?.length) html += `<span class="chip t" title="${esc(res.failed.join('\n'))}">${res.failed.length} run(s) failed to index</span>`;
+  html += '</div>';
+  for (const q of res.queries) {
+    const ms = res.matches.filter(m => m.query === q).sort((a, b) => inSel(b) - inSel(a));
+    html += `<div class="findq">${esc(q)} <span class="muted">· ${ms.length ? ms.length + ' match' + (ms.length === 1 ? '' : 'es') : res.pending ? 'not found yet' : 'not found'}</span></div>`;
+    if (!ms.length) continue;
+    html += '<table><thead><tr><th>run</th><th>trajectory id</th><th>task</th><th>variant</th><th>score</th><th>labels true</th><th>calls</th></tr></thead><tbody>';
+    for (const m of ms) {
+      const on = Object.entries(m.labels || {}).filter(([, v]) => v === true).map(([k]) => `<span class="chip ${GOOD.has(k) ? 'g' : 't'}">${esc(k)}</span>`).join(' ');
+      html += `<tr data-run="${esc(m.run)}" data-key="${esc(rowKey(m))}"><td class="mono">${esc(m.run)}${inSel(m) ? ' <span class="chip">selected</span>' : ''}</td><td class="mono">${esc(m.trajectory_id)}</td><td class="mono">${esc(m.task_id)}</td><td>${esc(m.variant ?? '')}</td><td>${esc(m.score ?? '')}</td><td style="white-space:normal">${on}</td><td class="num">${fmtNum(m.n_turns)}</td></tr>`;
+    }
+    html += '</tbody></table>';
+  }
+  $('#content').innerHTML = html;
+  $('#content').querySelectorAll('tbody tr').forEach(tr => tr.onclick = () => { setHash(tr.dataset.run, tr.dataset.key); route(); });
 }
 
 // ---------------------------------------------------------------- runs

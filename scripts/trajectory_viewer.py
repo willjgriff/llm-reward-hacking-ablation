@@ -42,7 +42,7 @@ def parse_extra_root(spec: str) -> tuple[str, Path]:
 def make_handler(data_root: Path, store: viewer.IndexStore, judge: dict) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, fmt, *args):  # quieter than the default
-            if "/api/index" not in (args[0] if args else ""):
+            if not any(p in (args[0] if args else "") for p in ("/api/index", "/api/find")):
                 sys.stderr.write("%s - %s\n" % (self.address_string(), fmt % args))
 
         def _send(self, status: int, body: bytes, content_type: str) -> None:
@@ -66,6 +66,8 @@ def make_handler(data_root: Path, store: viewer.IndexStore, judge: dict) -> type
                     self._json({"data_root": str(data_root), "extra_roots": {k: str(v) for k, v in store.extra_roots.items()}, "runs": viewer.discover_runs(data_root, store.extra_roots)})
                 elif url.path == "/api/index":
                     self._json(store.get(q["run"]))
+                elif url.path == "/api/find":
+                    self._json(store.find(q.get("q", "")))
                 elif url.path == "/api/trajectory":
                     path = viewer.run_file(data_root, q["run"], store.extra_roots)
                     rec = viewer.load_record(path, int(q["i"]), int(q.get("offset", -1)))
