@@ -11,6 +11,7 @@ import gzip
 import hashlib
 import json
 import os
+import re
 import threading
 from pathlib import Path
 from typing import Any, BinaryIO, Iterator
@@ -57,7 +58,8 @@ def discover_runs(data_root: Path, extra_roots: ExtraRoots | None = None) -> lis
         runs.append(
             {
                 "id": rel,
-                "group": run_dir.parent.relative_to(data_root).as_posix(),
+                "group": (group := run_dir.parent.relative_to(data_root).as_posix()),
+                "collection": collection_of(group),
                 "name": run_dir.name,
                 "file": chosen.name,
                 "bytes": chosen.stat().st_size,
@@ -79,7 +81,8 @@ def _discover_ortho(name: str, root: Path) -> list[dict[str, Any]]:
         runs.append(
             {
                 "id": f"{name}/{rel}",
-                "group": f"{name}/{p.parent.relative_to(root).as_posix()}",
+                "group": (group := f"{name}/{p.parent.relative_to(root).as_posix()}"),
+                "collection": collection_of(group),
                 "name": p.stem,
                 "file": p.name,
                 "bytes": p.stat().st_size,
@@ -87,6 +90,18 @@ def _discover_ortho(name: str, root: Path) -> list[dict[str, Any]]:
             }
         )
     return runs
+
+
+def collection_of(group: str) -> str:
+    """Sidebar collection of a group: its parent path (stage1 -> stage1, sweep/<model>/<env> -> sweep/<model>,
+    <name>/inspect/<env> -> <name>/inspect)."""
+    return group.rpartition("/")[0] or group
+
+
+def _ortho_created(path: Path) -> str | None:
+    """Inspect log names start with the run's start time, e.g. 2026-10-01T01-36-04-00-00_<task>_<id>.jsonl."""
+    m = re.match(r"(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})", path.name)
+    return f"{m[1]}T{m[2]}:{m[3]}:{m[4]}" if m else None
 
 
 def _ortho_config_summary(path: Path) -> dict[str, Any] | None:
@@ -99,7 +114,7 @@ def _ortho_config_summary(path: Path) -> dict[str, Any] | None:
     cfg = rec.get("cfg") or {}
     return {
         "run_id": rec.get("rollout_id", "").split("/")[0] or None,
-        "created": None,
+        "created": _ortho_created(path),
         "model": rec.get("model"),
         "model_revision": None,
         "benchmark": "ortho",
