@@ -2,7 +2,7 @@
 
 Read `/root/.claude/CLAUDE.md` and the project `CLAUDE.md` first. The first overrides the second, and this mission overrides both where it is more specific. Nobody is watching: wherever this says "report", write it to `box_report/stage9/` and carry on.
 
-- **Box:** fresh, **one H100 80 GB**, ≥ 300 GB disk.
+- **Box:** fresh, **one H100 80 GB**, **200 GB disk** (less than the 300 planned: one merged checkpoint at a time, delete each after its rollouts are uploaded, `df -h /` before every export and every djinn collection chunk).
 - **Agent:** Claude Code at **xhigh**, started with `bash sweep/box_claude.sh --effort xhigh --mission sweep/mission_stage9.md`.
 - **Hard cap: 72 h from the first LOG.md line.** Self-stop earlier when a stopping rule says so.
 - **SUMMARY.md:** keep it current enough to be useful if the session dies at any moment.
