@@ -1,0 +1,597 @@
+"""Utility classes for problem generation."""
+
+import os
+import random
+import string
+import re
+from typing import Dict, Any, List, Optional, Tuple
+import dspy
+import json
+import logging
+from djinn.core.sandbox_defs import VerificationStatus
+import time
+import inspect
+from djinn.sandbox.offline_verification_service import OfflineVerificationService
+
+logger = logging.getLogger(__name__)
+
+class TestCaseGenerator:
+    """Generates test case input/output pairs using E2B sandbox."""
+    
+    def __init__(self):
+        # Track successful test case generation for early failure detection
+        self.successful_test_generation_calls = 0
+        self.total_test_generation_calls = 0
+        
+        # Register DSPy tools for test case generation
+        self.random_integers_tool = dspy.Tool(
+            self._generate_random_integers,
+            name="generate_random_integers",
+            desc="Generate a list of random integers within a specified range"
+        )
+        
+        self.random_strings_tool = dspy.Tool(
+            self._generate_random_strings,
+            name="generate_random_strings", 
+            desc="Generate random strings with varying lengths and character sets, including edge cases. Supports regex-style character patterns like [a-z], [A-Z], [0-9], [a-zA-Z0-9], [!@#$%], etc."
+        )
+        
+        self.random_lists_tool = dspy.Tool(
+            self._generate_random_lists,
+            name="generate_random_lists",
+            desc="Generate lists with random elements of specified type"
+        )
+        
+        self.edge_integers_tool = dspy.Tool(
+            self._get_edge_case_integers,
+            name="get_edge_case_integers",
+            desc="Get common edge case integers for testing"
+        )
+        
+        self.edge_strings_tool = dspy.Tool(
+            self._get_edge_case_strings,
+            name="get_edge_case_strings", 
+            desc="Get common edge case strings for testing"
+        )
+        
+        # Add validation tool
+        self.validation_tool = dspy.Tool(
+            self._validate_problem_consistency,
+            name="validate_problem_consistency",
+            desc="Validate that a problem's components (ground truth, exploit, verifiers, test cases) work together correctly"
+        )
+        
+        # Add alignment checking tool
+        self.alignment_tool = dspy.Tool(
+            self._check_vulnerability_alignment,
+            name="check_vulnerability_alignment",
+            desc="Check whether an exploit properly targets the specific vulnerability in an insecure verifier and analyze alignment quality"
+        )
+        
+        # Add ground truth checking tool (different from full problem consistency)
+        self.check_gt_tool = dspy.Tool(
+            self._check_ground_truth,
+            name="check_ground_truth",
+            desc="Check that a ground truth solution correctly implements the required function and passes test cases"
+        )
+
+
+        self.generate_test_cases_tool = dspy.Tool(
+            self.generate_test_cases,
+            name="generate_test_cases",
+            desc="Generate test cases for a given function"
+        )
+        
+        # List of all tools for easy access
+        self.tools = [
+            self.random_integers_tool,
+            self.random_strings_tool,
+            self.random_lists_tool,
+            self.edge_integers_tool,
+            self.edge_strings_tool,
+            self.validation_tool,
+            self.alignment_tool,
+            self.check_gt_tool
+        ]
+        
+        # Stage-specific tool lists
+        self.stage1_tools = []  # No tools needed for ChainOfThought description generation
+        
+        self.stage2_tools = [  # Test generation + GT validation
+            self.random_integers_tool,
+            self.random_strings_tool,
+            self.random_lists_tool,
+            self.edge_integers_tool,
+            self.edge_strings_tool,
+            self.check_gt_tool,
+            self.generate_test_cases_tool
+        ]
+        
+        self.stage3_tools = [  # Validation and alignment
+            self.validation_tool,
+            self.alignment_tool
+        ]
+    
+    def reset_test_generation_tracking(self):
+        """Reset the tracking counters for test case generation."""
+        self.successful_test_generation_calls = 0
+        self.total_test_generation_calls = 0
+        logger.info("🔄 Reset test generation tracking counters")
+    
+    def has_successful_test_generation(self):
+        """Check if any successful test case generation occurred."""
+        return self.successful_test_generation_calls > 0
+    
+    def get_test_generation_stats(self):
+        """Get statistics about test case generation attempts."""
+        return {
+            "successful_calls": self.successful_test_generation_calls,
+            "total_calls": self.total_test_generation_calls,
+            "success_rate": self.successful_test_generation_calls / max(1, self.total_test_generation_calls)
+        }
+    
+    def _generate_random_integers(self, count: int = 10, min_val: int = -100, max_val: int = 100) -> List[int]:
+        """Generate a list of random integers."""
+        return list(map(str, [random.randint(min_val, max_val) for _ in range(count)]))
+    
+    def _generate_random_strings(self, count: int = 10, min_length: int = 0, max_length: int = 20, 
+                               char_pattern: str = None) -> List[str]:
+        """Generate a list of random strings with varying lengths and character sets.
+        
+        Args:
+            count: Number of strings to generate
+            min_length: Minimum string length
+            max_length: Maximum string length
+            char_pattern: Regex-style character class pattern (e.g., '[a-z]', '[A-Z0-9]', '[!@#$%]')
+                         If None, uses default mixed character sets
+        """
+        strings = []
+        
+        # Include some edge case strings (unless a specific pattern is requested)
+        if char_pattern is None:
+            edge_cases = ["", " ", "a", "AA", "aA", "123", "!@#", "\n", "\t"]
+            strings.extend(edge_cases[:min(count, len(edge_cases))])
+        
+        # Generate random strings for remaining count
+        remaining = count - len(strings)
+        for _ in range(remaining):
+            length = random.randint(min_length, max_length)
+            if length == 0:
+                strings.append("")
+            else:
+                if char_pattern:
+                    # Use regex-style character pattern
+                    char_set = self._parse_char_pattern(char_pattern)
+                    if not char_set:
+                        # Fallback to default if pattern is invalid
+                        char_set = string.ascii_letters + string.digits
+                else:
+                    # Mix of different character types (default behavior)
+                    char_set = random.choice([
+                        string.ascii_lowercase,
+                        string.ascii_uppercase, 
+                        string.ascii_letters,
+                        string.digits,
+                        string.ascii_letters + string.digits,
+                        string.ascii_letters + string.digits + " ",
+                        string.printable.strip()
+                    ])
+                strings.append(''.join(random.choice(char_set) for _ in range(length)))
+        
+        return strings[:count]
+    
+    def _parse_char_pattern(self, pattern: str) -> str:
+        """Parse regex-style character class pattern into a character set string.
+        
+        Args:
+            pattern: Regex-style pattern like '[a-z]', '[A-Z0-9]', '[!@#$%]'
+            
+        Returns:
+            String containing all characters matching the pattern
+        """
+        if not pattern:
+            return ""
+        
+        # Remove surrounding brackets if present
+        if pattern.startswith('[') and pattern.endswith(']'):
+            pattern = pattern[1:-1]
+        
+        char_set = ""
+        i = 0
+        while i < len(pattern):
+            if i + 2 < len(pattern) and pattern[i + 1] == '-':
+                # Handle range like 'a-z', 'A-Z', '0-9'
+                start_char = pattern[i]
+                end_char = pattern[i + 2]
+                try:
+                    start_ord = ord(start_char)
+                    end_ord = ord(end_char)
+                    if start_ord <= end_ord:
+                        char_set += ''.join(chr(j) for j in range(start_ord, end_ord + 1))
+                    else:
+                        # Invalid range, add characters individually
+                        char_set += start_char + end_char
+                except (ValueError, TypeError):
+                    # Invalid characters, add as-is
+                    char_set += start_char + end_char
+                i += 3
+            else:
+                # Handle individual character
+                char_set += pattern[i]
+                i += 1
+        
+        # Remove duplicates while preserving order
+        seen = set()
+        unique_chars = ""
+        for char in char_set:
+            if char not in seen:
+                seen.add(char)
+                unique_chars += char
+        
+        return unique_chars
+    
+    def _generate_random_lists(self, count: int = 10, min_length: int = 0, max_length: int = 10, 
+                            element_type: str = "int") -> List[List]:
+        """Generate random lists with specified element types."""
+        lists = []
+        
+        # Include edge cases
+        lists.append([])  # empty list
+        if count > 1:
+            lists.append([1])  # single element
+        
+        remaining = count - len(lists)
+        for _ in range(remaining):
+            length = random.randint(min_length, max_length)
+            if length == 0:
+                lists.append([])
+            else:
+                if element_type == "int":
+                    lst = [random.randint(-50, 50) for _ in range(length)]
+                elif element_type == "str":
+                    lst = [self._generate_random_strings(1, 1, 5)[0] for _ in range(length)]
+                else:
+                    lst = [random.choice([1, "a", True, None]) for _ in range(length)]
+                lists.append(lst)
+        
+        return lists[:count]
+    
+    def _get_edge_case_integers(self) -> List[int]:
+        """Get common edge case integers."""
+        return list(map(str, [0, 1, -1, 2, -2, 10, -10, 100, -100, 1000, -1000]))
+    
+    def _get_edge_case_strings(self) -> List[str]:
+        """Get common edge case strings."""
+        return [
+            "",           # empty
+            " ",          # single space
+            "a",          # single char
+            "A",          # single uppercase
+            "1",          # single digit
+            "aa",         # repeated char
+            "AB",         # uppercase
+            "ab",         # lowercase
+            "Ab",         # mixed case
+            "123",        # digits
+            "a1b",        # mixed alphanumeric
+            "hello",      # normal word
+            "Hello World", # with space
+            "hello\nworld", # with newline
+            "  hello  ",  # with padding spaces
+            "!@#$%",      # special chars
+            "αβγ",        # unicode
+        ]
+    
+    def generate_test_cases(self, ground_truth_code: str, test_inputs: List[Any], function_name: str = None, tracked: bool = True) -> Dict[str, Any]:
+        """
+        Run ground truth code with test inputs using the offline subprocess runner to generate input/output pairs.
+        
+        Args:
+            ground_truth_code: The ground truth Python code
+            test_inputs: List of inputs to test with (provided by LLM using tools)
+            function_name: Name of the function to call (auto-detected if None)
+            
+        Returns:
+            Dictionary containing:
+            - 'test_cases': List of (input, output) tuples
+            - 'success': Boolean indicating overall success
+            - 'errors': List of error messages
+            - 'warnings': List of warning messages
+            - 'summary': String summary of the operation
+        """
+        # Track this call for early failure detection (optional)
+        if tracked:
+            self.total_test_generation_calls += 1
+        
+        result = {
+            'test_cases': [],
+            'success': False,
+            'errors': [],
+            'warnings': [],
+            'summary': ''
+        }
+        
+        # Use offline secure subprocess runner to execute ground truth over inputs
+        try:
+            # Auto-detect function name if not provided
+            if not function_name:
+                function_name = self._extract_function_name(ground_truth_code)
+
+            if not function_name:
+                error_msg = "Could not detect function name from ground truth code"
+                result['errors'].append(error_msg)
+                result['summary'] = "❌ FAIL - No function name detected"
+                print(f"❌ {error_msg}")
+                return result
+
+            service = OfflineVerificationService()
+
+            # Prepare config for batch execution in secure mode
+            per_timeout = 5
+            batch_inputs = list(test_inputs)
+            config = {
+                "submission_code": ground_truth_code,
+                "function_name": function_name,
+                "batch_inputs": batch_inputs,
+                "timeout_per_test": per_timeout,
+            }
+
+            # Overall timeout scaled to number of inputs
+            num = max(1, len(batch_inputs))
+            total_timeout = max(1, per_timeout + 1) * num + 2
+            config["total_timeout"] = total_timeout
+
+            execution_result = service._send_daemon_request("secure", config, total_timeout)
+
+            test_cases = []
+            failed_cases = []
+
+            if execution_result.get("subprocess_error"):
+                err = execution_result["subprocess_error"]
+                result['errors'].append(err)
+                result['summary'] = "❌ FAIL - Subprocess error"
+                print(f"❌ {err}")
+                return result
+
+            batch_results = execution_result.get("batch_results")
+            if not isinstance(batch_results, list):
+                error_msg = f"Unexpected offline runner response: {execution_result}"
+                result['errors'].append(error_msg)
+                result['summary'] = "❌ FAIL - Invalid runner response"
+                print(f"❌ {error_msg}")
+                return result
+
+            for i, (inp, res) in enumerate(zip(batch_inputs, batch_results)):
+                err = res.get("error") if isinstance(res, dict) else "Invalid result"
+                if err:
+                    failed_cases.append(i+1)
+                    result['warnings'].append(f"Test case {i+1} error: {err}")
+                    continue
+                actual_output = res.get("output")
+                test_cases.append((inp, actual_output))
+                print(f"✅ Test case {i+1}: {repr(inp)} -> {repr(actual_output)}")
+
+            result['test_cases'] = test_cases
+            result['success'] = len(test_cases) > 0
+
+            total_inputs = len(batch_inputs)
+            successful_cases = len(test_cases)
+            failed_count = len(failed_cases)
+
+            if successful_cases == total_inputs:
+                result['summary'] = f"✅ SUCCESS - Generated {successful_cases}/{total_inputs} test cases"
+                if tracked:
+                    self.successful_test_generation_calls += 1
+            elif successful_cases > 0:
+                result['summary'] = f"⚠️  PARTIAL - Generated {successful_cases}/{total_inputs} test cases ({failed_count} failed)"
+            else:
+                result['summary'] = f"❌ FAIL - No test cases generated from {total_inputs} inputs"
+
+            print(f"📊 {result['summary']}")
+            return result
+
+        except Exception as e:
+            error_msg = f"Offline runner error: {e}"
+            result['errors'].append(error_msg)
+            result['summary'] = "❌ FAIL - Offline runner error"
+            print(f"❌ {error_msg}")
+            return result
+    
+    def _extract_function_name(self, code: str) -> Optional[str]:
+        """Extract the main function name from Python code."""
+        import re
+        
+        # Look for function definitions
+        function_matches = re.findall(r'^def\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(', code, re.MULTILINE)
+        
+        if function_matches:
+            return function_matches[0]  # Return first function found
+        return None 
+
+    def _validate_problem_consistency(self, ground_truth: str, exploit: str, function_name: str, 
+                                    test_cases: str, insecure_test_cases: str, exploit_key: str) -> str:
+        """
+        Validate problem consistency and return results as JSON string.
+        
+        Args:
+            ground_truth: Ground truth solution code
+            exploit: Exploit code
+            function_name: Name of the function to test
+            test_cases: Test cases as string representation of list of tuples
+            insecure_test_cases: Insecure test cases as string representation of list of tuples
+            exploit_key: Key of the exploit to validate
+            
+        Returns:
+            JSON string containing validation results
+        """
+        try:
+            # Import the verification function
+            from .verifier import verify_problem_consistency
+            import ast
+            
+            # Parse test_cases from string to list of tuples
+            try:
+                parsed_test_cases = ast.literal_eval(test_cases)
+            except (ValueError, SyntaxError) as e:
+                return json.dumps({
+                    "is_consistent": False,
+                    "errors": [f"Failed to parse test_cases: {e}"],
+                    "validation_summary": "❌ FAIL - Invalid test cases format"
+                })
+            
+            
+            # Run validation
+            results = verify_problem_consistency(
+                ground_truth=ground_truth,
+                exploit=exploit,
+                function_name=function_name,
+                test_cases=parsed_test_cases,
+                insecure_test_cases=insecure_test_cases,
+                exploit_key=exploit_key
+            )
+            
+            # Create summary for the LLM
+            from .verifier import get_consistency_summary
+            summary = get_consistency_summary(results)
+            results["validation_summary"] = summary
+            
+            # Log the validation results
+            logger.info(f"Problem validation completed - Consistent: {results['is_consistent']}")
+            if results['is_consistent']:
+                logger.info("✅ All validation checks passed")
+            else:
+                logger.info(f"❌ Validation failed with {len(results['errors'])} errors:")
+                for i, error in enumerate(results['errors'][:3], 1):  # Log first 3 errors
+                    logger.info(f"  {i}. {error}")
+                if len(results['errors']) > 3:
+                    logger.info(f"  ... and {len(results['errors']) - 3} more errors")
+            
+            return json.dumps(results, indent=2)
+            
+        except Exception as e:
+            logger.error(f"❌ Validation tool execution failed: {str(e)}")
+            return json.dumps({
+                "is_consistent": False,
+                "errors": [f"Validation error: {str(e)}"],
+                "validation_summary": f"❌ FAIL - Validation error: {str(e)}"
+            })
+    
+    def _check_vulnerability_alignment(self, exploit_code: str, insecure_verifier_code: str, 
+                                     exploit_description: str) -> str:
+        """
+        Check vulnerability alignment and return results as JSON string.
+        
+        Args:
+            exploit_code: The exploit code to analyze
+            insecure_verifier_code: The insecure verifier code containing the vulnerability
+            exploit_description: Description of what the exploit should accomplish
+            
+        Returns:
+            JSON string containing alignment analysis results
+        """
+        try:
+            # Import the alignment checker signature
+            from .signatures import VulnerabilityAlignmentChecker
+            import dspy
+            
+            # Create and run the alignment checker
+            alignment_checker = dspy.ChainOfThought(VulnerabilityAlignmentChecker)
+            
+            result = alignment_checker(
+                exploit_code=exploit_code,
+                insecure_verifier_code=insecure_verifier_code,
+                exploit_description=exploit_description
+            )
+            
+            # Convert to a structured format for the LLM
+            alignment_data = {
+                "positive_alignment_score": result.positive_alignment_score,
+                "negative_alignment_score": result.negative_alignment_score,
+                "vulnerability_analysis": result.vulnerability_analysis,
+                "exploit_analysis": result.exploit_analysis,
+                "alignment_reasoning": result.alignment_reasoning,
+                "recommendations": result.recommendations,
+                "passes_check": result.passes_check,
+                "alignment_summary": f"Alignment Check: {'✅ PASS' if result.passes_check else '❌ FAIL'} (Positive: {result.positive_alignment_score}/10, Negative: {result.negative_alignment_score}/10)"
+            }
+            
+            # Log the alignment results
+            logger.info(f"Vulnerability alignment check completed - Passes: {result.passes_check}")
+            logger.info(f"Alignment scores - Positive: {result.positive_alignment_score}/10, Negative: {result.negative_alignment_score}/10")
+            if result.passes_check:
+                logger.info("✅ Exploit properly targets vulnerability in insecure verifier")
+            else:
+                logger.info("❌ Alignment issues detected:")
+                logger.info(f"  Vulnerability: {result.vulnerability_analysis[:200]}...")
+                logger.info(f"  Exploit: {result.exploit_analysis[:200]}...")
+                logger.info(f"  Recommendations: {result.recommendations[:200]}...")
+            
+            return json.dumps(alignment_data, indent=2)
+            
+        except Exception as e:
+            logger.error(f"❌ Alignment tool execution failed: {str(e)}")
+            return json.dumps({
+                "positive_alignment_score": "0",
+                "negative_alignment_score": "0",
+                "passes_check": False,
+                "error": f"Alignment check error: {str(e)}",
+                "alignment_summary": f"❌ FAIL - Alignment check error: {str(e)}"
+            })
+    
+    def _check_ground_truth(self, ground_truth: str, function_name: str, test_cases: str) -> str:
+        """
+        Check that a ground truth solution correctly implements the required function and passes test cases.
+        
+        Args:
+            ground_truth: Ground truth solution code
+            function_name: Name of the function to test
+            test_cases: Test cases as string representation of list of tuples
+            
+        Returns:
+            JSON string containing validation results
+        """
+        try:
+            import ast
+            import json
+            
+            # Parse test_cases from string to list of tuples
+            try:
+                parsed_test_cases = ast.literal_eval(test_cases)
+            except (ValueError, SyntaxError) as e:
+                return json.dumps({
+                    "passes_check": False,
+                    "errors": [f"Failed to parse test_cases: {e}"],
+                    "gt_summary": "❌ FAIL - Invalid test cases format"
+                })
+
+            from .verifier import verify_gt_secure
+            test_result = verify_gt_secure(ground_truth, function_name, parsed_test_cases)  
+
+            passes_check = test_result.status == VerificationStatus.PASSED
+            errors = test_result.feedback.split("\n")
+
+            # Log the ground truth check results
+            logger.info(f"Ground truth check completed - Passes: {passes_check}")
+            logger.info(f"Feedback: {test_result.feedback}")
+            if passes_check:
+                logger.info("✅ Ground truth correctly implements the required function")
+            else:
+                logger.info("❌ Ground truth validation issues:")
+                for i, error in enumerate(errors[:3], 1):  # Log first 3 errors
+                    logger.info(f"  {i}. {error}")
+                if len(errors) > 3:
+                    logger.info(f"  ... and {len(errors) - 3} more errors")
+            
+            return json.dumps({
+                "passes_check": passes_check,
+                "errors": errors,
+                "gt_summary": f"Ground Truth Check: {'✅ PASS' if passes_check else '❌ FAIL'} ({len(errors)} errors)"
+            }, indent=2)
+            
+        except Exception as e:
+            logger.error(f"❌ Ground truth check failed: {str(e)}")
+            return json.dumps({
+                "passes_check": False,
+                "errors": [f"Ground truth check error: {str(e)}"],
+                "gt_summary": f"❌ FAIL - Ground truth check error: {str(e)}"
+            }) 

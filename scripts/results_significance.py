@@ -8,14 +8,16 @@ Tests (two-sided, H0 = the intervention does not change the rate):
   * primary, paired by task: the two models ran on the same task ids, so under
     H0 the row's and the base's outcomes on a task are exchangeable. Per task
     (cluster) d = mean(row) - mean(base) over its samples; p from a sign-flip
-    permutation of the d's (exact enumeration when every d is in {-1, 0, 1}
-    with one sample per arm, i.e. the exact McNemar test; Monte Carlo
-    otherwise). Valid with several samples per task and any within-task
-    correlation; tasks must be independent draws.
+    test of the d's, computed exactly: the McNemar binomial with one sample per
+    arm, otherwise a dynamic-programming convolution over the integer grid the
+    d's live on (Monte Carlo only if that grid is not found). Valid with several
+    samples per task and any within-task correlation; tasks must be
+    independent draws.
   * unpaired check: Fisher exact on pooled counts (assumes independent
     samples, so it ignores task clustering; reported for reference only).
   * stratified unpaired (hook / steering runs that only stored per-cell
-    counts): permutation of outcomes between arms within each cell.
+    counts): exact, the row's total under H0 is a sum of independent per-cell
+    hypergeometrics.
 Effect: difference of rates with a 95 % task-cluster bootstrap interval.
 Multiple comparisons: Holm (family-wise) and Benjamini-Hochberg (FDR) over
 every primary hack-rate test in the table.
@@ -159,6 +161,8 @@ def paired_test(row: dict, base: dict, keep=None) -> dict:
         nz = d[d != 0]
         if len(nz) == 0:
             p, method = 1.0, "sign-flip"
+        elif (exact := exact_signflip(nz, obs)) is not None:
+            p, method = exact, "sign-flip (exact)"
         elif len(nz) <= 20:
             signs = np.array(np.meshgrid(*[[-1, 1]] * len(nz))).reshape(len(nz), -1).T
             p = float(np.mean(np.abs(signs @ nz) >= obs - 1e-12))
@@ -195,6 +199,31 @@ def paired_test(row: dict, base: dict, keep=None) -> dict:
     }
 
 
+def exact_signflip(nz: np.ndarray, obs: float) -> float | None:
+    """Exact two-sided sign-flip p-value by dynamic programming over the sum.
+    Per-task differences of rates with few samples per task are multiples of
+    1/q for a small q, so the null distribution of the sum is a convolution of
+    {-q·d, +q·d} with probability 1/2 each, on an integer grid."""
+    for q in (1, 2, 3, 4, 6, 8, 12, 16, 24):
+        z = nz * q
+        if np.allclose(z, np.round(z), atol=1e-9):
+            break
+    else:
+        return None
+    z = np.abs(np.round(z).astype(np.int64))
+    total = int(z.sum())
+    dist = np.zeros(2 * total + 1)
+    dist[total] = 1.0  # index = sum + total
+    for v in z:
+        nxt = np.zeros_like(dist)
+        nxt[: len(dist) - v] += 0.5 * dist[v:]   # -v
+        nxt[v:] += 0.5 * dist[: len(dist) - v]   # +v
+        dist = nxt
+    sums = np.arange(-total, total + 1)
+    t = round(obs * q)
+    return float(min(1.0, dist[np.abs(sums) >= t].sum()))
+
+
 def tasks_for_power(p0: float, p1: float, m: float, r, b, alpha: float = 0.05) -> int | None:
     if abs(p1 - p0) < 1e-9:
         return None
@@ -222,14 +251,17 @@ def stratified_counts_test(row_cells: dict, base_cells: dict) -> dict:
     # under H0, row's count in a cell is hypergeometric given the cell's margins
     exp = sum(row_cells[c][1] * (row_cells[c][0] + base_cells[c][0]) / (row_cells[c][1] + base_cells[c][1]) for c in cells if row_cells[c][1] + base_cells[c][1])
     obs = abs(kr - exp)
-    sims = np.zeros(N_PERM)
+    # exact: the row's total is a sum of independent per-cell hypergeometrics
+    dist = np.array([1.0])
     for c in cells:
         k, n = row_cells[c]
         k2, n2 = base_cells[c]
         if n + n2 == 0:
             continue
-        sims += stats.hypergeom.rvs(n + n2, k + k2, n, size=N_PERM, random_state=RNG)
-    p = (int((np.abs(sims - exp) >= obs - 1e-9).sum()) + 1) / (N_PERM + 1)
+        support = np.arange(0, n + 1)
+        dist = np.convolve(dist, stats.hypergeom.pmf(support, n + n2, k + k2, n))
+    totals = np.arange(len(dist))
+    p = float(min(1.0, dist[np.abs(totals - exp) >= obs - 1e-9].sum()))
     fisher = stats.fisher_exact([[kr, nr - kr], [kb, nb - kb]]).pvalue
     pr, pb = kr / nr if nr else float("nan"), kb / nb if nb else float("nan")
     return {
@@ -241,7 +273,7 @@ def stratified_counts_test(row_cells: dict, base_cells: dict) -> dict:
         "diff": pr - pb,
         "ci95": None,
         "p": p,
-        "method": "stratified permutation (cells)",
+        "method": "stratified exact (cells)",
         "p_fisher_unpaired": float(fisher),
         "n_tasks_80pct_power": tasks_for_power(pb, pr, 1, None, None) if nr and nb else None,
         "n_tasks_80pct_power_a001": tasks_for_power(pb, pr, 1, None, None, alpha=0.001) if nr and nb else None,
@@ -433,7 +465,7 @@ def bh(ps: list[float]) -> list[float]:
 
 
 def fmt_p(p: float) -> str:
-    return "<1e-5" if p <= 1 / (N_PERM + 1) + 1e-12 else f"{p:.2g}"
+    return f"{p:.2g}"
 
 
 def band(p: float) -> str:
