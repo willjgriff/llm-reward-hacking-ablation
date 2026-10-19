@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The one on-box command for the unattended sweep. Run as root after the repo tree (and upload.env) were
 # copied over from the laptop:
-#   ssh gpubox bash /workspace/llm-reward-hacking-ablation/sweep/box_claude.sh [--model claude-fable-5-1] [--mission sweep/mission.md] [--no-mission] [--watchdog-minutes 120] [--no-watchdog]
+#   ssh gpubox bash /workspace/llm-reward-hacking-ablation/sweep/box_claude.sh [--model claude-fable-5-1] [--effort xhigh] [--mission sweep/mission.md] [--no-mission] [--watchdog-minutes 120] [--no-watchdog]
 # Sets the box up if needed (scripts/setup_box.sh --no-serve), installs Claude Code and the unattended
 # rules, and starts Claude in tmux (bypass-permissions) with a prompt that points it at the mission file
 # (--mission, relative to the repo; default sweep/mission.md).
@@ -14,6 +14,7 @@ set -euo pipefail
 WATCHDOG=1
 WATCHDOG_MINUTES=120
 MODEL_ID=claude-fable-5-1
+EFFORT=
 START_MISSION=1
 MISSION=sweep/mission.md
 while [ $# -gt 0 ]; do
@@ -22,6 +23,7 @@ while [ $# -gt 0 ]; do
     --watchdog-minutes=*) WATCHDOG_MINUTES="${1#*=}"; shift ;;
     --no-watchdog) WATCHDOG=0; shift ;;
     --model) MODEL_ID="${2:-}"; shift 2 ;;
+    --effort) EFFORT="${2:-}"; shift 2 ;;
     --mission) MISSION="${2:-}"; shift 2 ;;
     --no-mission) START_MISSION=0; shift ;;
     -h|--help) sed -n '2,10p' "$0"; exit 0 ;;
@@ -45,6 +47,7 @@ case "$WATCHDOG_MINUTES" in ''|*[!0-9]*) die "--watchdog-minutes must be a whole
 case "$MISSION" in ''|/*|*..*|*[!A-Za-z0-9._/-]*) die "--mission must be a plain path relative to the repo, e.g. sweep/mission_stage4.md" ;; esac
 [ -f "$REPO_DIR/$MISSION" ] || die "missing $REPO_DIR/$MISSION"
 case "$MODEL_ID" in ''|*[!A-Za-z0-9._-]*) die "--model must be a plain model id or alias" ;; esac
+case "$EFFORT" in ''|low|medium|high|xhigh|max) ;; *) die "--effort must be one of low, medium, high, xhigh, max" ;; esac
 
 if [ ! -x "$LAUNCHER" ]; then
   step "Box set-up (scripts/setup_box.sh --no-serve; the agent starts vLLM itself with the mission's model)"
@@ -104,13 +107,15 @@ else
   # A shell stays behind if claude exits, so the session can be resumed with: claude --continue
   tmux new-session -d -s claude -c "$REPO_DIR"
   prompt=""
+  effort_arg=""
+  [ -n "$EFFORT" ] && effort_arg=" --effort $EFFORT"
   if [ "$START_MISSION" = 1 ]; then
     prompt=" 'Read $MISSION in this repository and carry it out from start to finish. Follow /root/.claude/CLAUDE.md.'"
   fi
   # cd explicitly: the Vast image's shell start-up changes to \$WORKSPACE after tmux has set the directory,
   # and Claude's project (and what `--continue` finds later) is the directory it was started in.
-  tmux send-keys -t claude "cd '$REPO_DIR' && IS_SANDBOX=1 '$CLAUDE_BIN' --dangerously-skip-permissions --strict-mcp-config --model $MODEL_ID$prompt" Enter
-  echo "started in $REPO_DIR (no MCP servers, model $MODEL_ID$([ "$START_MISSION" = 1 ] && echo ", mission $MISSION"))"
+  tmux send-keys -t claude "cd '$REPO_DIR' && IS_SANDBOX=1 '$CLAUDE_BIN' --dangerously-skip-permissions --strict-mcp-config --model $MODEL_ID$effort_arg$prompt" Enter
+  echo "started in $REPO_DIR (no MCP servers, model $MODEL_ID$([ -n "$EFFORT" ] && echo ", effort $EFFORT")$([ "$START_MISSION" = 1 ] && echo ", mission $MISSION"))"
 fi
 
 if [ "$WATCHDOG" = 1 ]; then
@@ -134,6 +139,6 @@ cat <<EOF
 Progress:  bash $REPO_DIR/sweep/status.sh [--watch 60]   (summary, live progress of the newest run, watchdog, disk)
            or: rhbench-run uv run scripts/stage1_progress.py --run-dir <run_dir>
            An open SSH session keeps the box from auto-stopping; without SSH read sweep/box_report/SUMMARY.md in the HF repo.
-Resume after a stop or a usage-limit pause:  cd $REPO_DIR && IS_SANDBOX=1 claude --dangerously-skip-permissions --strict-mcp-config --continue
+Resume after a stop or a usage-limit pause:  cd $REPO_DIR && IS_SANDBOX=1 claude --dangerously-skip-permissions --strict-mcp-config${effort_arg:-} --continue
 When finished: /logout inside claude (the login token otherwise stays on the stopped disk).
 EOF
