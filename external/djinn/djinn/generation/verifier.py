@@ -1,0 +1,128 @@
+"""Standardized secure verifier generation for consistent problem evaluation."""
+
+from typing import List, Tuple, Dict, Any, Optional
+from djinn.core.sandbox_defs import VerificationStatus, VerificationResultSingle
+
+def verify_problem_consistency(ground_truth: str, exploit: str, function_name: str, 
+                             test_cases: List[tuple], insecure_test_cases: List[tuple], exploit_key: str) -> Dict[str, Any]:
+    """
+    Comprehensive verification of problem consistency using sandboxed verification.
+    Tests that ground truth, exploit, and nulls behave correctly with both verifiers.
+    
+    Args:
+        ground_truth: Ground truth solution code
+        exploit: Exploit code
+        function_name: Name of the function to test
+        test_cases: List of (input, expected_output) tuples
+        insecure_test_cases: Insecure test cases
+        
+    Returns:
+        Dict with verification results and pass/fail status
+    """
+    # Create a temporary problem-like object for consistency checking
+    from djinn.sandbox.verification_service import get_verification_service
+    
+    class TempProblem:
+        def __init__(self):
+            self.ground_truth = ground_truth
+            self.exploit = exploit
+            self.function_name = function_name
+            self.test_cases = test_cases
+            self.insecure_test_cases = insecure_test_cases
+            self.exploit_expected_status = "passed"  # Default assumption
+            self.exploit_type = exploit_key
+        
+        def _normalize_test_cases(self):
+            """
+            Normalize test_cases to ensure they're a proper list of tuples.
+            Same implementation as Problem class to ensure consistency.
+            """
+            if not self.test_cases:
+                return []
+            
+            # If it's a string, parse it
+            if isinstance(self.test_cases, str):
+                try:
+                    import ast
+                    return ast.literal_eval(self.test_cases)
+                except (ValueError, SyntaxError):
+                    return []
+            
+            # If it's already a list, return as is
+            if isinstance(self.test_cases, list):
+                return self.test_cases
+                
+            return []
+    
+    service = get_verification_service()
+    temp_problem = TempProblem()
+    
+    return service.verify_problem_consistency(temp_problem)
+
+def verify_gt_secure(ground_truth: str, function_name: str, test_cases: List[tuple]) -> VerificationResultSingle:
+    """
+    Verify the ground truth solution using the secure verifier.
+    """
+    from djinn.sandbox.verification_service import get_verification_service
+    service = get_verification_service()
+
+    class TempProblem:
+        def __init__(self):
+            self.ground_truth = ground_truth
+            self.function_name = function_name
+            self.test_cases = test_cases
+        
+        def _normalize_test_cases(self):
+            return self.test_cases if self.test_cases else []
+
+    return service.verify_single(TempProblem(), ground_truth, secure=True)
+
+def get_consistency_summary(verification_results: Dict[str, Any]) -> str:
+    """
+    Generate a human-readable summary of consistency verification results.
+    
+    Args:
+        verification_results: Results from verify_problem_consistency
+        
+    Returns:
+        Formatted summary string
+    """
+    is_consistent = verification_results["is_consistent"]
+    errors = verification_results["errors"]
+    
+    summary = f"Consistency: {'✅ PASS' if is_consistent else '❌ FAIL'}\n"
+    
+    # Ground truth results
+    gt_secure = verification_results["ground_truth_secure"]
+    gt_insecure = verification_results["ground_truth_insecure"]
+    
+    if gt_secure and not gt_secure.get("error"):
+        status = "✅ PASS" if gt_secure.get("status") == VerificationStatus.PASSED.value else "❌ FAIL"
+        summary += f"Ground Truth vs Secure: {status}\n"
+    
+    if gt_insecure and not gt_insecure.get("error"):
+        status = "✅ PASS" if gt_insecure.get("status") == VerificationStatus.PASSED.value else "❌ FAIL"
+        summary += f"Ground Truth vs Insecure: {status}\n"
+    
+    # Exploit results
+    exploit_secure = verification_results["exploit_secure"]
+    exploit_insecure = verification_results["exploit_insecure"]
+    
+    if exploit_secure and not exploit_secure.get("error"):
+        status = "✅ FAIL" if exploit_secure.get("status") != VerificationStatus.PASSED.value else "❌ PASS"
+        summary += f"Exploit vs Secure: {status}\n"
+    
+    if exploit_insecure and not exploit_insecure.get("error"):
+        status = "✅ PASS" if exploit_insecure.get("status") == VerificationStatus.PASSED.value else "❌ FAIL"
+        summary += f"Exploit vs Insecure: {status}\n"
+    
+    # Errors
+    if errors:
+        summary += f"\nErrors ({len(errors)}):\n"
+        for error in errors[:3]:  # Show first 3 errors
+            summary += f"  - {error}\n"
+        if len(errors) > 3:
+            summary += f"  ... and {len(errors) - 3} more errors\n"
+    
+    return summary
+

@@ -1,0 +1,3 @@
+[submodule "djinn-problems"]
+        path = djinn/problems
+	url = https://github.com/EleutherAI/djinn-problems.git
