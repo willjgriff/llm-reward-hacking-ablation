@@ -6,7 +6,8 @@
 # Claude in tmux 'claude' (bypass-permissions, no MCP servers) with a prompt pointing at the mission.
 # Then: tmux attach -t claude, /login if needed, accept the bypass notice, detach with Ctrl-b d.
 # This VM never stops or deletes itself (Hetzner bills it until it is deleted). The GPU box stops itself
-# once no vLLM request has been in flight for its watchdog window (cheatbench/allow_tunnel_key.sh).
+# when the agent's final step runs request-gpubox-stop, or failing that once no vLLM request has been in
+# flight for its watchdog window (cheatbench/allow_tunnel_key.sh).
 # Safe to re-run: every step checks whether it is already done.
 set -euo pipefail
 

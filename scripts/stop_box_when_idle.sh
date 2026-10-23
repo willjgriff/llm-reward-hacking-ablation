@@ -5,7 +5,8 @@
 # "Stop" halts GPU charges and keeps the disk; it is not "destroy". Busy means any of: an inbound
 # SSH connection (terminal, VS Code, rsync/scp), a benchmark/export/upload/copy process, vLLM
 # requests in flight, or an unattended Claude Code session that wrote to its transcript recently. Cancel with: touch /tmp/rhablation-no-stop
-# SSH connections from the CheatBench VM's tunnel do not count (see TUNNEL_PEERS_FILE below).
+# SSH connections from the CheatBench VM's tunnel do not count (see TUNNEL_PEERS_FILE below); a stop request from
+# that VM (STOP_REQUEST_FILE) skips the rest of the idle window.
 # --check only verifies that the instance can stop itself (used as a preflight).
 set -uo pipefail
 
@@ -26,6 +27,9 @@ case "$IDLE_MINUTES" in ''|*[!0-9]*) die "--idle-minutes must be a whole number"
 
 PORT="${PORT:-8000}"
 CANCEL_FILE="${RHABLATION_NO_STOP_FILE:-/tmp/rhablation-no-stop}"
+# Created over SSH by the CheatBench VM when it is done (cheatbench/allow_tunnel_key.sh, DONE_KEY): stop as soon as
+# nothing is busy instead of after the full idle window. Removed when armed (stale) and before stopping.
+STOP_REQUEST_FILE="${RHABLATION_STOP_REQUEST_FILE:-/tmp/rhablation-stop-requested}"
 LOG=/tmp/stop_box_when_idle.log
 CLAUDE_PROJECTS_DIR="${CLAUDE_PROJECTS_DIR:-$HOME/.claude/projects}"
 CLAUDE_ACTIVE_MINUTES="${CLAUDE_ACTIVE_MINUTES:-15}"
@@ -97,21 +101,24 @@ busy_reason() {
 say() { echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $*" | tee -a "$LOG"; }
 
 say "auto-stop armed: instance $CONTAINER_ID stops after $IDLE_MINUTES idle minutes in a row. Cancel: touch $CANCEL_FILE"
+if [ -e "$STOP_REQUEST_FILE" ]; then rm -f "$STOP_REQUEST_FILE"; say "removed a stale stop request"; fi
 idle=0
 while :; do
   if [ -e "$CANCEL_FILE" ]; then say "cancelled by $CANCEL_FILE; box left running"; exit 0; fi
   reason="$(busy_reason)"
   if [ -n "$reason" ]; then
     idle=0
-    say "busy: $reason"
+    say "busy: $reason$([ -e "$STOP_REQUEST_FILE" ] && echo " (stop requested; waiting for that)")"
   else
     idle=$((idle + 1))
+    if [ -e "$STOP_REQUEST_FILE" ]; then say "stop requested ($STOP_REQUEST_FILE) and nothing busy"; break; fi
     say "idle $idle/$IDLE_MINUTES min"
   fi
   [ "$idle" -lt "$IDLE_MINUTES" ] || break
   sleep 60
 done
 
+rm -f "$STOP_REQUEST_FILE"
 until [ -e "$CANCEL_FILE" ]; do
   say "stopping instance $CONTAINER_ID (disk is kept; restart it from the Vast console)"
   "$VASTAI" stop instance "$CONTAINER_ID" 2>&1 | tee -a "$LOG"

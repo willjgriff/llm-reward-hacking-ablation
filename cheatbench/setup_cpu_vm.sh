@@ -119,17 +119,18 @@ sudo -u "$RUN_USER" unshare --user --map-root-user --mount --pid --fork --mount-
 echo "unprivileged namespaces ok for $RUN_USER"
 chmod 700 /root
 install -d -m 700 /root/.config /root/.config/rhablation
-for p in /root /root/.config/rhablation/upload.env "$TUNNEL_DIR/id_ed25519"; do
+for p in /root /root/.config/rhablation/upload.env "$TUNNEL_DIR/id_ed25519" /usr/local/sbin/request-gpubox-stop; do
   if sudo -u "$RUN_USER" test -r "$p" 2>/dev/null && [ -e "$p" ]; then die "$RUN_USER can read $p"; fi
 done
-echo "ok   $RUN_USER cannot read /root (upload token, Claude login) or the tunnel key"
+echo "ok   $RUN_USER cannot read /root (upload token, Claude login, done key) or the tunnel key"
 [ -f /root/.config/rhablation/upload.env ] \
   || echo "NOTE: /root/.config/rhablation/upload.env missing: copy it from the laptop before an unattended run"
 
 step "Tunnel to the GPU box"
 # The address the box sees this VM connect from (the box key is restricted to it).
 VM_IP="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "src") print $(i + 1)}')"
-allow_cmd() { echo "FROM=$VM_IP bash cheatbench/allow_tunnel_key.sh '$(cat "$TUNNEL_DIR/id_ed25519.pub")'"; }
+DONE_KEY=/root/.ssh/gpubox_done
+allow_cmd() { echo "FROM=$VM_IP DONE_KEY='$(cat "$DONE_KEY.pub")' bash cheatbench/allow_tunnel_key.sh '$(cat "$TUNNEL_DIR/id_ed25519.pub")'"; }
 if [ -z "$BOX_HOST" ]; then
   echo "BOX_HOST not set: skipping (re-run with BOX_HOST/BOX_PORT to add it)"
 else
@@ -174,6 +175,20 @@ EOF
   systemctl daemon-reload
   systemctl enable --now rhtunnel.service
   systemctl restart rhtunnel.service
+  # Second key, root's, for one thing only: the box runs a forced command that asks its watchdog to stop
+  # the box as soon as nothing there is busy (instead of after the idle window).
+  install -d -m 700 /root/.ssh
+  [ -f "$DONE_KEY" ] || ssh-keygen -q -t ed25519 -N '' -C "gpubox-done@$(hostname)" -f "$DONE_KEY"
+  cat > /usr/local/sbin/request-gpubox-stop <<'EOF'
+#!/usr/bin/env bash
+# Ask the GPU box to stop itself once nothing there is busy. Run as root when done with the box.
+set -euo pipefail
+. /etc/rhtunnel/box.env
+exec ssh -T -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+  -o UserKnownHostsFile=/etc/rhtunnel/known_hosts -i /root/.ssh/gpubox_done \
+  -p "$BOX_PORT" "$BOX_USER@$BOX_HOST"
+EOF
+  chmod 700 /usr/local/sbin/request-gpubox-stop
 fi
 
 step "CheatBench @ ${CB_COMMIT:0:7}"
