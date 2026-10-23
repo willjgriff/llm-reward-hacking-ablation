@@ -116,3 +116,21 @@ Block B is never dropped.
 | A1d | T-corr9 centred alone (= `B_TCORR_own`), **damage check only**: `tv_pos`, `tv_vb` mt4, MBPP 160 (cheat + honest) | `B_TCORR_own` ran on `tv_corr` only, so its 62.5 % has no honest-metric check yet |
 
 The adoption rule is unchanged, with one addition: A1c also qualifies if it lowers `tv_corr` by ≥ 10 points vs `U_G_centred` on the same ids (p < 0.01) with no damage and no worse TV-vb/MBPP/Grader result. If adopted, the confirmation rows add `tv_vb_mt6` and MMLU as usual.
+
+## Addendum 2 (user, 2026-10-23 19:10 UTC): family-count curve, screened before the second confirmation slot
+
+A5 (G from all 13 Grader families) screened **worse** than G9 (5 families), so the number and choice of families matters. Move the single-family rows out of block C and add subsets between 1 and 5 families, as **block-A candidates**: screen them **after `CONF_A3_G_L30`, A1c and A1d, and before A6 and the choice of the second confirmation candidate**, so a subset direction can win that slot under the unchanged adoption rule.
+
+- **Recipe:** same extraction (same-cell paired cheat vs non-cheat, `cot_last`, per-layer rows), each restricted to the listed families' cells. Steering at the window of the confirmed recipe: L30–63 if `CONF_A3_G_L30` is adopted, else L40–63. α₁ calibrated per direction (harmless KL 0.05). The phase-4a screen readouts.
+- **Rows** (11):
+
+  | id | families | count |
+  |---|---|---|
+  | F1_parity, F1_sign, F1_letter, F1_weekday, F1_pets_listed | each family alone | 5 |
+  | F2_best, F2_worst | the two single families with the lowest / highest TV-vb proxy | 2 |
+  | F3_a, F3_b | two random triples (seed 0) | 2 |
+  | F4_best, F4_worst | the stage-7 leave-one-family-out folds (4 families) with the lowest / highest TV-vb proxy, screened in this order after the others | 2 |
+
+- **Report:** a family-count table: n families (1 / 2 / 3 / 4 / 5 = G9 / 13 = G13) × each screen readout, with the cosine to G9 at L30–63 / L40–63.
+- **Block C** keeps only the n = 25 / 50 / 100 per-class rows; the single-family full rollouts move here (full rollouts on TV-vb mt4 + MBPP for the best and worst single family, as before).
+- **Time:** ≈ 5.5 h of screen. If the cap gets tight, F4_* are dropped first, then F3_*. Block B is still never dropped.
