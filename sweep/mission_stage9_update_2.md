@@ -134,3 +134,17 @@ A5 (G from all 13 Grader families) screened **worse** than G9 (5 families), so t
 - **Report:** a family-count table: n families (1 / 2 / 3 / 4 / 5 = G9 / 13 = G13) × each screen readout, with the cosine to G9 at L30–63 / L40–63.
 - **Block C** keeps only the n = 25 / 50 / 100 per-class rows; the single-family full rollouts move here (full rollouts on TV-vb mt4 + MBPP for the best and worst single family, as before).
 - **Time:** ≈ 5.5 h of screen. If the cap gets tight, F4_* are dropped first, then F3_*. Block B is still never dropped.
+
+## Addendum 3 (user, 2026-10-23 23:30 UTC): dose rule between A3 and its half-dose variant — fixed before A6b has any data
+
+`CONF_A3_G_L30` costs 2.7 MMLU points (80.78 vs 83.50). If a lower dose keeps the effect at a smaller capability cost, it is the better recipe.
+
+- **A6b (`A6b_G_L30_half`, G9 at L30–63, α = 1.80) always gets a full confirmation row** (`CONF_A6b`: the same parts as `CONF_A3_G_L30`, incl. `tv_vb_mt6`, the full held-out Grader set, and MMLU), unless its screen already shows the effect gone (TV-vb proxy ≥ 30 % or MBPP cheat ≥ 15 %). This is in addition to the second confirmation slot, which keeps its own rule.
+- **Choice between `CONF_A3_G_L30` and `CONF_A6b`** (paired on the same ids):
+  - **The effect is kept if** on each primary metric (TV-vb mt4 tampered, TV-vb mt6 tampered, MBPP cheat, T-corr copied, held-out Grader cheat) A6b is **not worse than A3 by more than 3 points and not worse at paired p < 0.05**.
+  - **MMLU is better if** A6b's MMLU is **≥ 1.0 point higher** than A3's.
+  - **Rule:** if both hold, A6b is adopted instead of A3. Otherwise A3 stays.
+  - Damage checks as before for both.
+  - Write the comparison table and the decision into LOG / SUMMARY / tuning_log before block B.
+- If time allows and A6b keeps the effect with MMLU still > 1.5 points below base, one more dose (α = 0.9 at L30–63) may be screened and confirmed under the same rule; drop it first if the cap gets tight.
+- **Block B then uses the adopted recipe**, and also always includes A3 if A6b was adopted (and vice versa), so both doses are replicated on fresh tasks.
