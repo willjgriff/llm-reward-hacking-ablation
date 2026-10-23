@@ -12,11 +12,14 @@ CPU VM (Hetzner)                                   GPU box (Vast)
    Terminus-2 → http://127.0.0.1:8000/v1
  rhtunnel user: autossh -L 8000 ───── ssh ─────▶   key: permitopen 127.0.0.1:8000, from=<VM IP>
  root: Claude Code, upload.env → HF                 watchdog ignores the VM's SSH, stops on vLLM idle
+ root: request-gpubox-stop ────────── ssh ─────▶   done key: forced command, creates the stop request
 ```
 
 The laptop is needed only to set things up. The VM uploads results to the HF dataset repo itself
-(`cheatbench/<run>/`, report in `cheatbench/box_report/`), the GPU box stops itself once vLLM has
-been idle for its watchdog window, and the VM keeps billing until you delete it (Hetzner bills
+(`cheatbench/<run>/`, report in `cheatbench/box_report/`), and at the end asks the GPU box to stop
+(`request-gpubox-stop`: a second VM key that can only run one forced command, which creates the
+watchdog's stop-request file; the box stops as soon as nothing on it is busy). If the VM never asks,
+the box stops after its idle window anyway. The VM keeps billing until you delete it (Hetzner bills
 stopped servers too).
 
 ## Steps
@@ -34,9 +37,10 @@ stopped servers too).
    ```
 3. **Set up the VM** (values from `~/.ssh/gpubox.conf`):
    `ssh hetzner 'cd /root/llm-reward-hacking-ablation && BOX_HOST=<gpu box ip> BOX_PORT=<gpu box ssh port> bash cheatbench/setup_cpu_vm.sh'`.
-   It ends by printing the exact command for step 4 (`FROM=<VM IP> bash cheatbench/allow_tunnel_key.sh '<key>'`).
+   It ends by printing the exact command for step 4 (`FROM=<VM IP> DONE_KEY='<key>' bash cheatbench/allow_tunnel_key.sh '<key>'`).
 4. **On the GPU box, as root, from the repo:** run that command. It authorises the key for the tunnel
-   only, from the VM's address only, records the address for the watchdog and arms the watchdog
+   only and the done key for its forced command only, both from the VM's address only, records the
+   address for the watchdog and arms the watchdog
    (`WATCHDOG_MINUTES`, default 120). A watchdog that was already running predates the tunnel
    exception and would keep the box up: add `RESTART_WATCHDOG=1`.
    Make sure vLLM serves `Qwen/Qwen3.8-27B` (`MODEL=Qwen/Qwen3.8-27B bash scripts/serve_vllm.sh`).
@@ -46,7 +50,8 @@ stopped servers too).
    then `ssh -t hetzner tmux attach -t claude`, `/login`, accept the bypass notice, detach (Ctrl-b d).
    Rules for that session: `cheatbench/CLAUDE.unattended.md`. You can now close the laptop.
 7. **Afterwards:** reports and runs are in the HF repo under `cheatbench/`. The agent stops
-   `rhtunnel` at the end, the GPU box stops itself, and you delete the VM in the Hetzner console
+   `rhtunnel` and runs `request-gpubox-stop` at the end, the GPU box stops itself within about a
+   minute of being idle, and you delete the VM in the Hetzner console
    (`/logout` in Claude first if you will reuse a snapshot).
 
 ## What the setup does not cover yet

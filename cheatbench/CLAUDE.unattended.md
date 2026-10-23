@@ -13,7 +13,8 @@ rules apply on this VM only and override the project `CLAUDE.md` wherever the tw
   `http://127.0.0.1:8000/v1` through the systemd service `rhtunnel` (autossh, port forward only). You have no
   shell on the GPU box and cannot start, stop or change its vLLM; if the endpoint is down or serves the wrong
   model, record it and stop.
-- The GPU box stops itself after its watchdog window with no vLLM request in flight. A long pause between
+- The GPU box stops itself after its watchdog window with no vLLM request in flight, or earlier when you
+  run `request-gpubox-stop` in the final step. A long pause between
   episodes (hours) can therefore lose the box; keep runs back to back, and build sandbox images before the
   first run, not between runs.
 
@@ -61,5 +62,7 @@ rules apply on this VM only and override the project `CLAUDE.md` wherever the tw
 
 ## Finishing
 When the mission is done: bring `SUMMARY.md` up to date with a short "What I would do next", upload
-`box_report`, verify every upload, then `systemctl stop rhtunnel` (so the GPU box's watchdog sees nobody
-connected) and stop. Do not stop, power off or delete this VM.
+`box_report`, verify every upload, then `systemctl stop rhtunnel` and `request-gpubox-stop` (prints
+"stop requested"; the GPU box then stops itself as soon as nothing there is busy). Record its output in
+`LOG.md` and stop. Never run `request-gpubox-stop` before the final step: it ends the GPU box for this
+mission. Do not stop, power off or delete this VM.
