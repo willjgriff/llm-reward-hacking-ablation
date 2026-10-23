@@ -2,7 +2,7 @@
 # Run as root on the GPU box: authorise the CheatBench VM's tunnel key for port forwarding to
 # vLLM on 127.0.0.1:PORT and nothing else (no shell, no other ports, no agent/X11 forwarding),
 # from the VM's address only, and let the box stop itself once the VM is done with it.
-#   FROM=<vm public ipv4> DONE_KEY='ssh-ed25519 AAAA... gpubox-done@host' [PORT=8000] [WATCHDOG_MINUTES=120] \
+#   FROM=<vm public ipv4> DONE_KEY='ssh-ed25519 AAAA... gpubox-done@host' [PORT=8000] [WATCHDOG_MINUTES=60] \
 #     [RESTART_WATCHDOG=1] bash cheatbench/allow_tunnel_key.sh 'ssh-ed25519 AAAA... rhtunnel@host'
 # The VM's address goes to /root/.config/rhablation/tunnel_peers, which scripts/stop_box_when_idle.sh
 # reads: the always-open tunnel then does not count as somebody connected, and the box stops after
@@ -16,7 +16,7 @@ set -euo pipefail
 
 PORT="${PORT:-8000}"
 FROM="${FROM:-}"
-WATCHDOG_MINUTES="${WATCHDOG_MINUTES:-120}"
+WATCHDOG_MINUTES="${WATCHDOG_MINUTES:-60}"
 RESTART_WATCHDOG="${RESTART_WATCHDOG:-0}"
 DONE_KEY="${DONE_KEY:-}"
 KEY="${1:-}"
