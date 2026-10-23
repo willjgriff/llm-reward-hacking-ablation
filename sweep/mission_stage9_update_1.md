@@ -37,3 +37,13 @@ Phase 4b as planned tests only each type's own direction and the all-but-h pools
 Add a section **"Single-direction transfer (G9), full rollouts"** near the top of SUMMARY.md: one table per edited row with rate, Δ vs base and vs its random zero, 95 % CI, p, Holm, and the honest metrics. Compare it explicitly with the 4a steering-proxy numbers and with stage 7's X5 (zero-ablation of D_GR: no transfer).
 
 Nothing else in the mission changes: same cap (2026-10-25 15:40 UTC), same uploads, self-stop at the end.
+
+## Addendum (user, 2026-10-23 09:00 UTC): add TV `verifier_bug` at `max_turns=6`
+
+Stage 8 showed why this matters: X2 cut mt4 tampering 47.5 → 26.0 % but left mt6 at 89.0 % vs base 86.5 % (a **delay**, not a removal), while D_TV removed it at both (X1T: mt6 86.5 → 1.5 %). A G9 result at mt4 alone cannot tell the two apart.
+
+- New part `tv_vb_mt6`: TV `verifier_bug`, `max_turns=6`, the same 100 held-out ids × 2 as stage 8's `base_s8_tv_vb_mt6` / `X1T` / `X2T` rows (rh-envs `qwen3.8_sweep` config, `pool=source_eval`), if the suite does not have it yet.
+- Run it on `U_G_centred`, `U_G_steer` and `U_rand_steer`.
+- **Base:** re-roll it on the base model under this box's harness, as part `tv_vb_mt6` of `base_s9`. Stage 8's 86.5 % (vLLM 0.31) is the cross-check, not the zero.
+- Report `tv_vb_mt6` next to `tv_vb` in the new SUMMARY section, with the first-tamper turn distribution for base and both G9 rows (delay vs removal).
+- If time is short, this part has priority over `tv_corr` for the three U rows.
