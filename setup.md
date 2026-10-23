@@ -210,7 +210,7 @@ rsync -a --exclude .venv --exclude data --exclude .git --exclude .claude ./ gpub
 ssh gpubox 'mkdir -p /root/.config/rhablation && chmod 700 /root/.config/rhablation'
 scp ~/.config/rhablation/upload.env gpubox:/root/.config/rhablation/upload.env
 # everything else happens on the box
-ssh gpubox bash /workspace/llm-reward-hacking-ablation/sweep/box_claude.sh   # [--model claude-fable-5-1] [--no-mission] [--watchdog-minutes 120] [--no-watchdog]
+ssh gpubox bash /workspace/llm-reward-hacking-ablation/sweep/box_claude.sh   # [--model claude-fable-5-1] [--no-mission] [--watchdog-minutes 90] [--no-watchdog]
 ssh -t gpubox tmux attach -t claude
 ```
 
@@ -226,7 +226,7 @@ The script:
 - copies `sweep/CLAUDE.unattended.md` to `/root/.claude/CLAUDE.md`: no stopping for approval, all
   model-written code through `rhbench-run`, reports in `box_report/`, uploads under `sweep/` in the HF repo;
 - checks that `rhbench` cannot read `/root/.claude` (where the login token is stored);
-- arms a watchdog (tmux session `watchdog` = `scripts/stop_box_when_idle.sh --idle-minutes 120`). A `claude`
+- arms a watchdog (tmux session `watchdog` = `scripts/stop_box_when_idle.sh --idle-minutes 90`). A `claude`
   process alone does not count as busy, but a session transcript written to in the last 15 minutes does,
   so long stretches of coding do not stop the box while a session that stalled (usage limit, API error)
   or finished still lets it stop, disk kept. Resume from the directory the session was started in (the

@@ -48,7 +48,7 @@ box only and override the project `CLAUDE.md` wherever the two conflict.
 ## Waiting costs nothing; polling does
 - Launch long runs as background tasks (or in their own tmux session) so you are re-invoked when they exit. Do not sit in a polling loop.
 - When you do check on a run, use one `stage1_progress.py` call, and not more often than every 20–30 minutes.
-- A watchdog stops (does not destroy) this box after 120 minutes in a row with no SSH connection, no benchmark/upload/download process, no vLLM request and no activity from you (your session transcript not written to for 15 minutes). While you work or a run is going it never triggers. Pass `--no-stop` whenever you call `scripts/stage1_pipeline.sh`; the watchdog owns stopping.
+- A watchdog stops (does not destroy) this box after 90 minutes in a row with no SSH connection, no benchmark/upload/download process, no vLLM request and no activity from you (your session transcript not written to for 15 minutes). While you work or a run is going it never triggers. Pass `--no-stop` whenever you call `scripts/stage1_pipeline.sh`; the watchdog owns stopping.
 
 ## Reporting (the user reads only these)
 - `box_report/LOG.md`: append-only, UTC timestamps. Decisions and reasons, commands for each full run, timings, errors, exclusions, contradictions.
