@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The one on-box command for the unattended sweep. Run as root after the repo tree (and upload.env) were
 # copied over from the laptop:
-#   ssh gpubox bash /workspace/llm-reward-hacking-ablation/sweep/box_claude.sh [--model claude-fable-5-1] [--effort xhigh] [--mission sweep/mission.md] [--no-mission] [--watchdog-minutes 120] [--no-watchdog]
+#   ssh gpubox bash /workspace/llm-reward-hacking-ablation/sweep/box_claude.sh [--model claude-fable-5-1] [--effort xhigh] [--mission sweep/mission.md] [--no-mission] [--watchdog-minutes 90] [--no-watchdog]
 # Sets the box up if needed (scripts/setup_box.sh --no-serve), installs Claude Code and the unattended
 # rules, and starts Claude in tmux (bypass-permissions) with a prompt that points it at the mission file
 # (--mission, relative to the repo; default sweep/mission.md).
@@ -12,7 +12,7 @@
 set -euo pipefail
 
 WATCHDOG=1
-WATCHDOG_MINUTES=120
+WATCHDOG_MINUTES=90
 MODEL_ID=claude-fable-5-1
 EFFORT=
 START_MISSION=1
