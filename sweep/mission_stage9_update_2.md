@@ -100,3 +100,19 @@ Block B is never dropped.
   - the capability table;
   - the J-lens top/bottom tokens.
 - Then the final stage-9 summary, uploads, verification and self-stop as in the mission.
+
+## Addendum 1 (user, 2026-10-23 15:45 UTC)
+
+**Post chain: trim it now** (edit `post_chain.sh` while `G_random_s2` runs; log the change).
+- **Keep:** `G_random_s2` (second random steering seed), **MMLU on `base_s9`** under this box's lm-eval, and the significance tables (all three zeros, Holm over the full family).
+- **Drop:** the diversity curves with each zero, the weight-edit curve (`stage9_edit_curve.py`), and MMLU on the two `B_*_abh` rows. Pooling is no longer pursued.
+- Then start update 2 as planned.
+
+**Block A: add the mean-centred stack of G9 and T-corr9.** A1/A2 stack them as *steering*; under steering T-corr9 barely moved the corrupted proxy (98.3 → 96.2 %), whereas its **centred** weight edit (`B_TCORR_own`) cut corrupted copying 95.5 → 62.5 % on full rollouts. So:
+
+| id | candidate | screen |
+|---|---|---|
+| A1c | **Centred stack:** the frozen phase-0 centred edit of G9, then the centred edit of T-corr9 on the merged result (each a 24-round stack + its own `down_proj` biases with its own μ, L40–63, w 1.0; as stage 8's P4 stacked two edits) | **full rollouts** on `tv_corr` (100 × 2) and `tv_vb` mt4 (100 × 2) instead of the proxies: the corrupted proxy missed the centred T-corr effect. Plus the usual MBPP 160 and Grader held-out families, and `tv_pos` |
+| A1d | T-corr9 centred alone (= `B_TCORR_own`), **damage check only**: `tv_pos`, `tv_vb` mt4, MBPP 160 (cheat + honest) | `B_TCORR_own` ran on `tv_corr` only, so its 62.5 % has no honest-metric check yet |
+
+The adoption rule is unchanged, with one addition: A1c also qualifies if it lowers `tv_corr` by ≥ 10 points vs `U_G_centred` on the same ids (p < 0.01) with no damage and no worse TV-vb/MBPP/Grader result. If adopted, the confirmation rows add `tv_vb_mt6` and MMLU as usual.
