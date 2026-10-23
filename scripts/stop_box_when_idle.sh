@@ -5,6 +5,7 @@
 # "Stop" halts GPU charges and keeps the disk; it is not "destroy". Busy means any of: an inbound
 # SSH connection (terminal, VS Code, rsync/scp), a benchmark/export/upload/copy process, vLLM
 # requests in flight, or an unattended Claude Code session that wrote to its transcript recently. Cancel with: touch /tmp/rhablation-no-stop
+# SSH connections from the CheatBench VM's tunnel do not count (see TUNNEL_PEERS_FILE below).
 # --check only verifies that the instance can stop itself (used as a preflight).
 set -uo pipefail
 
@@ -28,6 +29,10 @@ CANCEL_FILE="${RHABLATION_NO_STOP_FILE:-/tmp/rhablation-no-stop}"
 LOG=/tmp/stop_box_when_idle.log
 CLAUDE_PROJECTS_DIR="${CLAUDE_PROJECTS_DIR:-$HOME/.claude/projects}"
 CLAUDE_ACTIVE_MINUTES="${CLAUDE_ACTIVE_MINUTES:-15}"
+# SSH connections from these addresses (one per line, written by cheatbench/allow_tunnel_key.sh) are not
+# "somebody connected": the CheatBench VM keeps its vLLM tunnel open for the whole run and beyond, and its
+# actual use already shows up as vLLM requests in flight. Re-read every minute.
+TUNNEL_PEERS_FILE="${RHABLATION_TUNNEL_PEERS:-/root/.config/rhablation/tunnel_peers}"
 # Downloads and installs count as busy so a long gap between runs (new model, new env) is not idle.
 # A `claude` process alone is deliberately not busy: a stalled or finished one must not hold the box up.
 # What counts is its session transcript having been written to recently (CLAUDE_ACTIVE_MINUTES).
@@ -65,8 +70,13 @@ while [ "$pid" -gt 1 ]; do
 done
 
 busy_reason() {
-  local n procs
-  n="$(ss -Htn state established "( sport = :$SSH_PORT )" 2>/dev/null | wc -l)"
+  local n procs peers
+  peers="$(grep -Eo '^[0-9a-fA-F:.]+' "$TUNNEL_PEERS_FILE" 2>/dev/null | tr '\n' ' ')"
+  # Last column is the peer, e.g. 81.106.14.130:39957 or [::ffff:81.106.14.130]:39957.
+  n="$(ss -Htn state established "( sport = :$SSH_PORT )" 2>/dev/null | awk -v peers=" $peers" '
+    { p = $NF; sub(/:[0-9]+$/, "", p); gsub(/[][]/, "", p); sub(/^::ffff:/, "", p)
+      if (index(peers, " " p " ") == 0) n++ }
+    END { print n + 0 }')"
   if [ "$n" -gt 0 ]; then echo "$n ssh connection(s)"; return; fi
   procs="$(pgrep -f "$BUSY_PROCS" 2>/dev/null | while read -r p; do
     case "$ANCESTORS" in *" $p "*) continue ;; esac
