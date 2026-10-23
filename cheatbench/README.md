@@ -41,7 +41,7 @@ stopped servers too).
 4. **On the GPU box, as root, from the repo:** run that command. It authorises the key for the tunnel
    only and the done key for its forced command only, both from the VM's address only, records the
    address for the watchdog and arms the watchdog
-   (`WATCHDOG_MINUTES`, default 120). A watchdog that was already running predates the tunnel
+   (`WATCHDOG_MINUTES`, default 60). A watchdog that was already running predates the tunnel
    exception and would keep the box up: add `RESTART_WATCHDOG=1`.
    Make sure vLLM serves `Qwen/Qwen3.8-27B` (`MODEL=Qwen/Qwen3.8-27B bash scripts/serve_vllm.sh`).
 5. **Smoke:** re-run step 3 with `--smoke` added. It checks the tunnel and runs one
