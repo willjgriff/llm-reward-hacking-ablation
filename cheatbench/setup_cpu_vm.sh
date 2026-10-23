@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # One-time setup of a CPU-only VM (Hetzner Cloud CCX or similar: x86_64, Ubuntu 24.04, a real
 # kernel) that runs CheatBench episodes against the model vLLM serves on the GPU box.
-# Run as root on the VM, from a copy of this directory:
-#   BOX_HOST=<gpu box ip> BOX_PORT=<gpu box ssh port> bash setup_cpu_vm.sh [--smoke]
+# Run as root on the VM, from the root-owned repo copy (cheatbench/README.md):
+#   BOX_HOST=<gpu box ip> BOX_PORT=<gpu box ssh port> bash cheatbench/setup_cpu_vm.sh [--smoke]
 # Without BOX_HOST the tunnel step is skipped (sandbox only). Safe to re-run.
 #
 # Why a separate VM: CheatBench's only runtime is rootless enroot (user/pid/net namespaces via
@@ -13,9 +13,11 @@
 # Users:
 #   cheatbench  runs run.py and therefore every episode (model-written code). No sudo, no keys.
 #   rhtunnel    owns the tunnel key and runs autossh. cheatbench cannot read the key.
-# Nothing else with credentials belongs on this VM (no HF/OpenRouter keys; judge from the laptop),
-# and none in Hetzner cloud-init user-data either: open-network episodes share the host network
-# and can reach the metadata service.
+#   root        the only holder of credentials: the HF upload token (/root/.config/rhablation/upload.env,
+#               the fine-grained one-repo token the GPU box uses, so the VM uploads results without the
+#               laptop) and the Claude Code login of cheatbench/hetzner_claude.sh. No OpenRouter or other
+#               paid-API keys (judge off the VM), nothing in Hetzner cloud-init user-data: open-network
+#               episodes share the host network and can reach the metadata service.
 set -euo pipefail
 
 SMOKE=0
@@ -35,6 +37,7 @@ SERVED_MODEL="${SERVED_MODEL:-Qwen/Qwen3.8-27B}"   # must match vLLM's model nam
 CB_REPO="${CB_REPO:-https://github.com/centerforaisafety/cheatbench}"
 CB_COMMIT="${CB_COMMIT:-1bd70d4f7509966e069ef602e5c4df77d66d2802}"   # read 2026-10-23
 ENROOT_VERSION="${ENROOT_VERSION:-4.2.1}"
+UV_VERSION="${UV_VERSION:-0.8.17}"   # root's uvx, for scripts/upload_run.sh
 RUN_USER=cheatbench
 TUNNEL_USER=rhtunnel
 RUN_HOME="/home/$RUN_USER"
@@ -64,11 +67,18 @@ apt-get update -q
 apt-get install -y -q --no-install-recommends \
   git curl ca-certificates jq sudo \
   squashfs-tools squashfuse fuse-overlayfs fuse3 slirp4netns iptables iproute2 util-linux \
-  pigz parallel zstd \
+  pigz parallel zstd tmux rsync \
   python3 python3-venv python3-dev build-essential libcairo2 \
   autossh openssh-client
 python3 -c 'import sys; assert sys.version_info >= (3, 11), sys.version' \
   || die "CheatBench needs Python >= 3.11"
+if [ "$(/opt/rhtools/bin/uv --version 2>/dev/null | awk '{print $2}')" != "$UV_VERSION" ]; then
+  python3 -m venv /opt/rhtools
+  /opt/rhtools/bin/pip install -q "uv==$UV_VERSION"
+fi
+ln -sf /opt/rhtools/bin/uv /usr/local/bin/uv
+ln -sf /opt/rhtools/bin/uvx /usr/local/bin/uvx
+uv --version
 
 step "enroot $ENROOT_VERSION"
 if dpkg -s enroot >/dev/null 2>&1 && [ "$(dpkg-query -W -f='${Version}' enroot)" = "$ENROOT_VERSION-1" ]; then
@@ -107,8 +117,19 @@ fi
 sudo -u "$RUN_USER" unshare --user --map-root-user --mount --pid --fork --mount-proc true \
   || die "unprivileged unshare still fails for $RUN_USER"
 echo "unprivileged namespaces ok for $RUN_USER"
+chmod 700 /root
+install -d -m 700 /root/.config /root/.config/rhablation
+for p in /root /root/.config/rhablation/upload.env "$TUNNEL_DIR/id_ed25519"; do
+  if sudo -u "$RUN_USER" test -r "$p" 2>/dev/null && [ -e "$p" ]; then die "$RUN_USER can read $p"; fi
+done
+echo "ok   $RUN_USER cannot read /root (upload token, Claude login) or the tunnel key"
+[ -f /root/.config/rhablation/upload.env ] \
+  || echo "NOTE: /root/.config/rhablation/upload.env missing: copy it from the laptop before an unattended run"
 
 step "Tunnel to the GPU box"
+# The address the box sees this VM connect from (the box key is restricted to it).
+VM_IP="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "src") print $(i + 1)}')"
+allow_cmd() { echo "FROM=$VM_IP bash cheatbench/allow_tunnel_key.sh '$(cat "$TUNNEL_DIR/id_ed25519.pub")'"; }
 if [ -z "$BOX_HOST" ]; then
   echo "BOX_HOST not set: skipping (re-run with BOX_HOST/BOX_PORT to add it)"
 else
@@ -209,8 +230,8 @@ if [ -n "$BOX_HOST" ]; then
     echo "vLLM reachable through the tunnel, serving $SERVED_MODEL"
   else
     echo "vLLM NOT reachable yet. Usual causes:"
-    echo "  - the tunnel key is not authorised on the box: run there, as root,"
-    echo "      bash cheatbench/allow_tunnel_key.sh '$(cat "$TUNNEL_DIR/id_ed25519.pub")'"
+    echo "  - the tunnel key is not authorised on the box: run there, as root, from the repo,"
+    echo "      $(allow_cmd)"
     echo "  - vLLM is not serving $SERVED_MODEL on the box's 127.0.0.1:$VLLM_PORT"
     echo "  - journalctl -u rhtunnel -n 30"
     SMOKE=0
@@ -230,9 +251,11 @@ cat <<EOF
 Run episodes as $RUN_USER, never as root:
   sudo -u $RUN_USER -H bash -c 'cd $CB_DIR && .venv/bin/python run.py TASK \\
     --model qwen3.8-27b-low --models-config configs/models.local.yaml --no-judge --max-concurrent N'
-Outputs: $CB_DIR/outputs/. Judge later, off this VM.
+Outputs: $CB_DIR/outputs/. Judge later, off this VM. Upload a finished run as root:
+  bash scripts/upload_run.sh --run-dir $CB_DIR/outputs/<run> --dest-prefix cheatbench
+Unattended: bash cheatbench/hetzner_claude.sh --mission cheatbench/<mission>.md
 EOF
 if [ -n "$BOX_HOST" ]; then
-  echo "Tunnel public key (authorise on the box with cheatbench/allow_tunnel_key.sh):"
-  cat "$TUNNEL_DIR/id_ed25519.pub"
+  echo "Authorise the tunnel on the GPU box (as root, from the repo):"
+  echo "  $(allow_cmd)"
 fi
