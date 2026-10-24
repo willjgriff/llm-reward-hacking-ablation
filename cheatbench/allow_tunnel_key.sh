@@ -47,6 +47,8 @@ authorise() {
   if grep -qF "$blob" "$AUTH"; then
     grep -vF "$blob" "$AUTH" > "$AUTH.tmp" && cat "$AUTH.tmp" > "$AUTH" && rm -f "$AUTH.tmp"
   fi
+  # Vast writes the file without a final newline; appending to it glued our line onto the user's key.
+  if [ -s "$AUTH" ] && [ -n "$(tail -c1 "$AUTH")" ]; then echo >> "$AUTH"; fi
   echo "$1 $2" >> "$AUTH"
   grep -F "$blob" "$AUTH"
 }

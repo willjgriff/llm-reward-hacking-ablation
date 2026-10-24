@@ -94,7 +94,7 @@ for f in scripts/stage9_bias_checkpoint.py scripts/stage9_calibrate_alpha.py src
          src/rhablation/stage4_activations.py sweep/benchmarks/rhenvs/vllm_resid_bias/pyproject.toml; do
   [ -f "$S9/$f" ] || die "missing $S9/$f in the code mirror"
 done
-"$VLLM_ENV/bin/pip" install -q "$S9/sweep/benchmarks/rhenvs/vllm_resid_bias"
+uv pip install -q --python "$VLLM_ENV/bin/python" "$S9/sweep/benchmarks/rhenvs/vllm_resid_bias"   # uv venvs have no pip
 "$VLLM_ENV/bin/python" -c "import importlib.metadata as m; print('plugin', [e.name for e in m.entry_points(group='vllm.general_plugins')])"
 
 step "Base weights $BASE_MODEL @ ${BASE_REV:0:7} and the G9 direction"

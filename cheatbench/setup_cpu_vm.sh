@@ -93,6 +93,10 @@ else
   rm -rf "$tmp"
 fi
 enroot version
+# enroot's runtime dir defaults to ${XDG_RUNTIME_DIR:-/run}/enroot, and `sudo -u cheatbench` leaves XDG_RUNTIME_DIR
+# unset, so CheatBench's image build failed with "mkdir: cannot create directory '/run/enroot'". Episode starts are
+# unaffected (core/sandbox/runtime.py exports ENROOT_RUNTIME_PATH itself, and an exported value beats this file).
+echo 'ENROOT_RUNTIME_PATH /tmp/enroot-runtime-$(id -u)' > /etc/enroot/enroot.conf.d/50-rhablation-runtime.conf
 
 step "Unprivileged user namespaces"
 # Ubuntu >= 23.10 lets AppArmor deny unprivileged userns; CheatBench's sandbox needs them.
