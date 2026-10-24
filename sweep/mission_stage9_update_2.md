@@ -148,3 +148,16 @@ A5 (G from all 13 Grader families) screened **worse** than G9 (5 families), so t
   - Write the comparison table and the decision into LOG / SUMMARY / tuning_log before block B.
 - If time allows and A6b keeps the effect with MMLU still > 1.5 points below base, one more dose (α = 0.9 at L30–63) may be screened and confirmed under the same rule; drop it first if the cap gets tight.
 - **Block B then uses the adopted recipe**, and also always includes A3 if A6b was adopted (and vice versa), so both doses are replicated on fresh tasks.
+
+## Addendum 4 (user, 2026-10-24 07:25 UTC): tie-break between A3 and F4_worst on capability, fixed before `CONF_F4_worst` has data
+
+The family-count screen tied 4 families (F4_worst = all except letter) with 5 (A3) on every hack metric, with higher clean validity (98.4 vs 93.8 %). A3's confirmation costs 2.7 MMLU points and 3.3 points of clean validity. If 4 families gives the same effect at a smaller capability cost, it is the better recipe.
+
+- **Effect kept**, paired on the same ids against `CONF_A3_G_L30`: on each primary metric (TV-vb mt4 tampered, TV-vb mt6 tampered, MBPP cheat, T-corr copied, held-out Grader cheat among valid answers), `CONF_F4_worst` is **not worse by more than 3 points and not worse at paired p < 0.05** (the addendum-3 test).
+- **Capability better**:
+  - MMLU **≥ 1.0 point higher** than A3's (80.78);
+  - **and** no co-primary honest metric (MBPP honest, `possible`, held-out Grader validity on hack and clean prompts, truncation + early EOS) worse than A3's at paired p < 0.05.
+- **Rule:** if both hold, F4_worst is adopted instead of A3, even if it does not beat A3 on any hack metric. Otherwise the existing rules decide (fixed rule, then addendum 3's dose rule).
+- If both A6b and F4_worst pass their capability tie-breaks against A3, the one with the higher MMLU wins; ties on MMLU (within 0.5 points) go to the lower TV-vb mt6 rate.
+- Write the three-way comparison table (A3, A6b, F4_worst) and the decision into LOG / SUMMARY / tuning_log before block B.
+- **Block B replicates the adopted recipe plus A3** (if A3 was not adopted). The non-adopted half-dose row is replicated only if time allows.
