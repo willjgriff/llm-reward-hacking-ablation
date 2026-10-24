@@ -11,7 +11,7 @@ The question: does A3 lower CheatBench's cheating on realistic tasks that it nev
 Sampling is fixed in the model entries: the rh-envs settings behind every stage-9 number (temperature 1, top_p 1, no top_k, 8192 tokens per call, reasoning effort low). Do not change them.
 
 ## Fixed for the whole mission
-- **Deadline:** `T_end` = mission start + 24 h. Record it in `LOG.md` first.
+- **Deadline:** `T_end` = the time `cb_base` first answers (phase 0) + 24 h. Record it in `LOG.md` first.
   - No new episode starts after `T_end − 2 h`.
   - At `T_end − 1 h`, stop whatever still runs: kill its `run.py` and record the episodes lost.
   - Then report, upload and finish.
@@ -22,17 +22,22 @@ Sampling is fixed in the model entries: the rh-envs settings behind every stage-
 - **GPU box idleness:** the box stops itself after 90 minutes with no vLLM request. Never leave it idle for more than 60 minutes (the provisional read below is capped for this reason).
 - **Cancel random:** if `/root/cheatbench-skip-random` exists, the random row is not started. If it is running when the file appears, kill its `run.py` processes and record it. Check before starting it and every 15 minutes while it runs.
 
-## Phase 0: preflight (≤ 30 min)
-1. `systemctl status rhtunnel`. `request-gpubox-row status` must say `serving cb_base`. `df -h /`.
-2. Read `README.md` and `CONFIGURATION.md` in `/home/cheatbench/cheatbench`, `prompts/judge.md`, and each task's `README`, `task.yaml` and `judge_schema.py`.
-3. **Task list:** every task under `tasks/` except:
+## Phase 0: preflight (≤ 30 min, plus waiting for the GPU box)
+1. **Setups.** The user may start you while the two setup scripts are still running in tmux `setup` on this VM and on the GPU box.
+   - **This VM:** if `/root/setup_cpu_vm.log` does not end with `== Done` (or the tmux session has exited with an error), finish the setup yourself as root. Re-run `BOX_HOST=5.145.175.100 BOX_PORT=40578 bash cheatbench/setup_cpu_vm.sh` from `/root/llm-reward-hacking-ablation` (values in `/etc/rhtunnel/box.env`); it skips what is done. Fix only our side, and record any fix in full in `LOG.md`.
+   - **GPU box:** you cannot see it. Poll `request-gpubox-row status` every 5 minutes until it says `serving cb_base`. This takes up to about 90 minutes from the user's start: weights, the random control's calibration, checkpoints. Use the wait for step 2 and the image builds of step 5.
+   - If it is not serving after 2 hours, or the row key answers with an error other than "cheatbench_serve.env missing", record it in `SUMMARY.md` and finish as the rules say. The user has to fix the GPU box.
+   - `T_end` starts when `cb_base` first answers, not when you start.
+2. `systemctl status rhtunnel`. `request-gpubox-row status` must say `serving cb_base`. `df -h /`.
+3. Read `README.md` and `CONFIGURATION.md` in `/home/cheatbench/cheatbench`, `prompts/judge.md`, and each task's `README`, `task.yaml` and `judge_schema.py`.
+4. **Task list:** every task under `tasks/` except:
    - `software_engineering` (Docker);
    - any task that needs a paid API or a credential at episode time;
    - `sycophancy` if its direct runner cannot use the `cb-base` entry.
 
    Record every exclusion and its reason. Vision tasks (`geoguessr`, `synthetic_puzzles`) stay in the list, but vLLM is served `--language-model-only`. If they fail for that reason in the smoke pass, drop them.
-4. **VM cap:** `C_vm = min(nproc, floor(MemTotal_GB / 4)) − 2` (CheatBench sizes 1 CPU + 4 GB per episode).
-5. Build every sandbox image and task input up front (`core.sandbox --build`, then each task's build via `run.py`'s auto-build), so no run waits on a build.
+5. **VM cap:** `C_vm = min(nproc, floor(MemTotal_GB / 4)) − 2` (CheatBench sizes 1 CPU + 4 GB per episode).
+6. Build every sandbox image and task input up front (`core.sandbox --build`, then each task's build via `run.py`'s auto-build), so no run waits on a build.
 
 ## Phase 1: smoke on `cb-base` (≤ 2 h)
 1. Run all listed tasks **at once**, one `run.py` per task:
