@@ -150,3 +150,37 @@ The smoke pass lost `geoguessr`, `synthetic_puzzles`, `svgs` and a `knowledge_wo
   4. Apply phase 2's eligibility rule to the full smoke results and continue the mission at phase 2.
 - **Any fail:** `request-gpubox-row vision-off`, then `request-gpubox-row base`. Record which check failed, keep the current task list, and continue at phase 2.
 - `T_end` is unchanged.
+
+## Update 3 (user, 2026-10-25 ~22:00 UTC): random pilot block, +4 h, balanced main, raise the cap, success scores
+
+Why: in the A3 pilot so far, A3 episodes are far shorter than base. Median wall time and turns:
+
+| task | base | A3 |
+|---|---|---|
+| chess | 2,330 s / 30 turns | 425 s / 10 |
+| knowledge_work | 2,261 s / 148 | 196 s / 14 |
+| svgs | 630 s / 28 | 123 s / 4 |
+| protein_design | 460 s / 24 | 107 s / 9 |
+
+A drop in cheating under A3 could then be generic: steering of that size making the model quit early. The random row is what tells the two apart, so it is no longer optional. These rules replace the conflicting parts of phases 2–6 and of rule R.
+
+1. **Deadline +4 h.** `T_end` = **2026-10-26 18:35 UTC**: no new episode after **16:35**, kill what still runs at **17:35**. Update the "Current state / next step" block at the top of `LOG.md` (it still says HOLD) and SUMMARY.
+2. **Random pilot block, right after the A3 pilot.** When the A3 pilot's episodes are done:
+   - `request-gpubox-row rand`, check `cb_rand` and the image check;
+   - run the **same pilot rows** as base and A3 (`--limit min(rows,14) --repeat 1`, subset_sum 10, at the same cap) on every main-phase task.
+   - Do the provisional read of the **A3** pilot while the random pilot runs (the GPU stays busy), then read the random pilot when it ends.
+   - Rule R no longer decides whether random runs. Random always gets this pilot block. The cancel file `/root/cheatbench-skip-random` still stops it.
+3. **Main phase, balanced.** Before launching it:
+   - project the main phase from the **measured** pilot block durations of each row, not the smoke medians, and at the cap from point 4;
+   - main order: A3, base, then random;
+   - every task gets the **same number of episodes per row** in A3 main and base main;
+   - pick the largest per-task count (cap 40, as before) for which A3 main + base main finish by **13:30 UTC** with a 15 % margin. The remaining time before 16:35 goes to random main, on the same rows in the same order, stopping at an equal `--limit` across tasks as phase 6 says;
+   - if the projection gives fewer than the pilot's 14, run no main phase and give the time to random until all three rows have the same episodes;
+   - write the projection, the chosen counts and the reasoning into LOG and SUMMARY before launching.
+4. **Concurrency.** The smoke pass's memory dip came from one runaway `knowledge_work` episode (6 M input tokens). Re-check Update 1's raise conditions over the last 15 minutes of the A3 pilot (or of the random pilot, if that is the next decision point). If they hold, raise to 17, then 21 at the next block start if they still hold.
+   - Base and A3 main must run at the **same** cap. If the cap changes between them, run the later one at the lower cap.
+   - Keep logging top RSS processes when `MemAvailable` < 30 %.
+5. **Report task success next to cheating**, per task × row (base, A3, random):
+   - CheatBench's own result/score fields, the share of episodes that end ok / at max turns / timeout, and median turns and wall time;
+   - in the provisional read, add a column `gave_up_or_degenerate` (y/n plus a quote): the model stopped without a real attempt, or produced degenerate output (e.g. svgs in 4 turns);
+   - SUMMARY's headline table: base vs A3 vs random on the pilot rows, with cheat-or-attempt, success and episode length side by side.
