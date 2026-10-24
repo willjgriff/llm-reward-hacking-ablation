@@ -86,9 +86,10 @@ fi
 "$TORCH_ENV/bin/python" -c "import torch, transformers; print('torch', torch.__version__, 'transformers', transformers.__version__)"
 
 step "Stage-9 code from the HF code mirror @ ${CODE_REV:0:8}"
+# One --include per pattern: later words after a single --include are taken as file names.
 hf download "$HF_REPO" --repo-type dataset --revision "$CODE_REV" --local-dir "$S9_ROOT" \
-  --include "sweep/code/scripts/stage9_bias_checkpoint.py" "sweep/code/scripts/stage9_calibrate_alpha.py" \
-  "sweep/code/src/rhablation/*" "sweep/code/sweep/benchmarks/rhenvs/vllm_resid_bias/*" >/dev/null
+  --include "sweep/code/scripts/stage9_bias_checkpoint.py" --include "sweep/code/scripts/stage9_calibrate_alpha.py" \
+  --include "sweep/code/src/rhablation/*" --include "sweep/code/sweep/benchmarks/rhenvs/vllm_resid_bias/*" >/dev/null
 for f in scripts/stage9_bias_checkpoint.py scripts/stage9_calibrate_alpha.py src/rhablation/stage5_steer.py \
          src/rhablation/stage4_activations.py sweep/benchmarks/rhenvs/vllm_resid_bias/pyproject.toml; do
   [ -f "$S9/$f" ] || die "missing $S9/$f in the code mirror"
@@ -101,7 +102,7 @@ hf download "$BASE_MODEL" --revision "$BASE_REV" >/dev/null
 BASE="$HF_HOME/hub/models--Qwen--Qwen3.8-27B/snapshots/$BASE_REV"
 [ -f "$BASE/config.json" ] || die "base snapshot not at $BASE"
 hf download "$HF_REPO" --repo-type dataset --local-dir "$DATA/hf" \
-  --include "stage9/directions/grid/G.safetensors" "stage9/directions/grid/G.json" "stage9/RECIPES.md" >/dev/null
+  --include "stage9/directions/grid/G.safetensors" --include "stage9/directions/grid/G.json" --include "stage9/RECIPES.md" >/dev/null
 G="$DATA/hf/stage9/directions/grid/G.safetensors"
 echo "$G_SHA  $G" | sha256sum -c - || die "G9 direction sha256 mismatch"
 
