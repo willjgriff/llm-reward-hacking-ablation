@@ -153,6 +153,8 @@ MAX_MODEL_LEN=131072
 GPU_MEMORY_UTILIZATION=0.92
 MAX_NUM_SEQS=64
 SPEC_CONFIG='{"method": "mtp", "num_speculative_tokens": 3}'
+# 0 = also serve the vision encoder: CheatBench's Terminus-2 sends images (view_images) and three tasks need them.
+LANGUAGE_MODEL_ONLY=0
 EOF
   chmod 600 "$CONF"
 fi
