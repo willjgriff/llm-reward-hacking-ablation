@@ -106,3 +106,18 @@ Sampling is fixed in the model entries: the rh-envs settings behind every stage-
 - **"For the judge":** the run dirs per row and how many episodes are paired by row id across rows.
 
 Then upload and verify, `systemctl stop rhtunnel`, and `request-gpubox-stop`, as the rules say.
+
+## Update 1 (user, 2026-10-25 ~15:00 UTC): measured concurrency above the 1 CPU + 4 GB rule
+
+The VM stays a CCX43 (16 vCPU / 61 GB): the account cannot get a larger dedicated-vCPU limit yet. So `C_vm` = 13 by phase 0's formula, while the H200 holds 1,027,340 tokens of KV cache (≈ 20–50 typical episodes). That formula is CheatBench's conservative sizing; most of an episode waits on the model. It now gives the starting cap only:
+- **Measure:** during the smoke pass and the first hour of the pilot, log every minute the 1-minute load average, `MemAvailable`, swap use, and the OOM-kill count (`dmesg`/`journalctl -k`, as root).
+- **Raise** the concurrency cap by 4 at a time, up to **24**, while all of these held over the last 15 minutes:
+  - peak load average < 0.7 × nproc;
+  - `MemAvailable` > 25 % of `MemTotal`;
+  - no swap growth and no OOM kill;
+  - vLLM `num_requests_waiting` = 0.
+- **Back off** by 4 on an OOM kill, `MemAvailable` < 15 %, or load > 0.9 × nproc for 5 minutes. Also back off when timeouts look CPU-bound (episodes of CPU-heavy tasks, e.g. chess/go engines or protein design, timing out more than in the smoke pass).
+- **Keep the rows comparable:** decide the cap before each block and keep it fixed within the block. Base and A3 in the same phase run at the same cap. If the cap changes between the pilot's base and A3 blocks, record it and run the next block at the lower of the two.
+- Log every change with the numbers behind it, and use the final cap in phase 2's `n` formula (recompute `n` when the cap changes before the main phase).
+
+Also: the GPU box's idle window is now **240 minutes** for this run (user decision). Phase 0's "never leave it idle for more than 60 minutes" rule still stands.
