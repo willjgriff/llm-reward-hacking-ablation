@@ -13,6 +13,8 @@ HOST="${HOST:-127.0.0.1}"
 MAX_MODEL_LEN="${MAX_MODEL_LEN:-262144}"
 GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.90}"
 MODEL_REVISION="${MODEL_REVISION:-}"
+# 1 = text only (the default for every stage so far); 0 also serves the vision encoder (CheatBench tasks send images).
+LANGUAGE_MODEL_ONLY="${LANGUAGE_MODEL_ONLY:-1}"
 
 # FlashInfer's sampling kernel fails its arch check on Blackwell (sm_120):
 # "FlashInfer requires GPUs with sm75 or higher". Use vLLM's native top-k/top-p sampler.
@@ -26,6 +28,6 @@ exec vllm serve "$MODEL" \
   --reasoning-parser qwen3 \
   --enable-auto-tool-choice \
   --tool-call-parser qwen3_xml \
-  --language-model-only \
+  $([ "$LANGUAGE_MODEL_ONLY" = 1 ] && echo --language-model-only) \
   ${MODEL_REVISION:+--revision "$MODEL_REVISION"} \
   "$@"

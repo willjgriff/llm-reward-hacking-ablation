@@ -121,3 +121,32 @@ The VM stays a CCX43 (16 vCPU / 61 GB): the account cannot get a larger dedicate
 - Log every change with the numbers behind it, and use the final cap in phase 2's `n` formula (recompute `n` when the cap changes before the main phase).
 
 Also: the GPU box's idle window is now **240 minutes** for this run (user decision). Phase 0's "never leave it idle for more than 60 minutes" rule still stands.
+
+## Update 2 (user, 2026-10-25 ~16:00 UTC): turn on image input, test it, then continue (replaces the HOLD message)
+
+The smoke pass lost `geoguessr`, `synthetic_puzzles`, `svgs` and a `knowledge_work` episode to `At most 0 image(s)`: vLLM served `--language-model-only`. The GPU box can now serve the vision encoder too.
+- **Controls:** `request-gpubox-row vision-on` / `vision-off` (the new words on the row key). Each restarts the current row in that mode. Only use them with no episode running.
+- **What changes:** only the vision encoder is added. The text weights and the steering biases are the same files.
+- **Prepared on the laptop**, in `/root/vcheck/`:
+  - `vision_check.py`: stdlib; talks to `127.0.0.1:8000` through the tunnel.
+  - `lmo_base.json`: `cb_base` served text-only, recorded at 15:45 UTC. It holds first-token top-20 logprobs and 48 greedy tokens on 4 fixed prompts.
+
+### Test (≤ 30 min, after the chess smoke has finished and no `run.py` runs)
+1. `request-gpubox-row vision-on`. It restarts `cb_base` with vision; wait for `serving cb_base`.
+2. `python3 /root/vcheck/vision_check.py image`: the answer must say the image is red.
+3. `python3 /root/vcheck/vision_check.py save /root/vcheck/vis_base.json`, then `... compare /root/vcheck/lmo_base.json /root/vcheck/vis_base.json`.
+   - **Pass:** same top-1 token on all 4 prompts and KL < 0.02 on each.
+   - Greedy text should match for most of the 48 tokens; late divergence is bf16 noise.
+4. `request-gpubox-row a3`, run `image` again, then `save /root/vcheck/vis_a3.json` and `compare /root/vcheck/vis_base.json /root/vcheck/vis_a3.json`.
+   - **Pass:** the A3 edit is visible, i.e. greedy text diverges within the 48 tokens on ≥ 2 prompts, or KL > 0.005 on ≥ 1.
+   - If `cb_a3` is indistinguishable from `cb_base`, the biases are not applied in vision mode. That is a **fail**.
+5. Record every output verbatim in `LOG.md`.
+
+### Then
+- **All pass:** vision stays **on** for every row and phase (base, A3 and random are all served the same way).
+  1. `request-gpubox-row base`.
+  2. Smoke `geoguessr`, `synthetic_puzzles` and `svgs` again (2 episodes each, same run id `a3eval`).
+  3. Re-run `knowledge_work`'s failed episode. Check whether `run.py` counts a failed episode as done; use `--redo` only for these four tasks and only if it does.
+  4. Apply phase 2's eligibility rule to the full smoke results and continue the mission at phase 2.
+- **Any fail:** `request-gpubox-row vision-off`, then `request-gpubox-row base`. Record which check failed, keep the current task list, and continue at phase 2.
+- `T_end` is unchanged.

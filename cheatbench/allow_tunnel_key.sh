@@ -11,7 +11,7 @@
 # with RESTART_WATCHDOG=1. DONE_KEY (optional) is a second VM key whose only possible effect is a forced
 # command that creates the watchdog's stop-request file: the VM's request-gpubox-stop then stops the box
 # as soon as nothing on it is busy, instead of after the idle window. ROW_KEY (optional) is a third VM key whose
-# only possible effect is cheatbench/serve_row.sh with one of `base a3 rand status` (the VM's request-gpubox-row):
+# only possible effect is cheatbench/serve_row.sh with one of `base a3 rand status vision-on vision-off` (the VM's request-gpubox-row):
 # it switches which eval row vLLM serves (cheatbench/mission_a3.md).
 # Vast may rewrite /root/.ssh/authorized_keys on restart: re-run after one.
 set -euo pipefail
