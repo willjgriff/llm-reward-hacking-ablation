@@ -161,3 +161,15 @@ The family-count screen tied 4 families (F4_worst = all except letter) with 5 (A
 - If both A6b and F4_worst pass their capability tie-breaks against A3, the one with the higher MMLU wins; ties on MMLU (within 0.5 points) go to the lower TV-vb mt6 rate.
 - Write the three-way comparison table (A3, A6b, F4_worst) and the decision into LOG / SUMMARY / tuning_log before block B.
 - **Block B replicates the adopted recipe plus A3** (if A3 was not adopted). The non-adopted half-dose row is replicated only if time allows.
+
+## Addendum 5 (user, 2026-10-24 09:55 UTC): TV `corrupted` in block B, at 4 **and** 6 turns
+
+A3 and F4_worst differ only on `corrupted` (2.0 vs 7.5 % at mt4 on the reused ids, p 0.013), and every stage-9 `corrupted` run so far is `max_turns=4`. Stages 5c / 8 measured mt6 only under older harnesses (base 99–100 %).
+
+- **Add two parts to every block-B row** (`B2_base`, `B2_rand_steer`, `B2_G_steer`, `B2_G_centred`, `B2_F4_worst`, `B2_A3_G_L30`):
+  - `tv_corr` (corrupted, mt4);
+  - `tv_corr_mt6` (corrupted, `max_turns=6`, the rh-envs `qwen3.8_sweep` config as stage 8's `corr_mt6` part).
+- **Tasks:** fresh ids, never used by any evaluation or direction extraction, recorded beside block B's list. Use **100 ids × 2** per part (the block-B TV-vb set or a disjoint one, as the `corrupted` pool allows; record which).
+- **Base:** `B2_base` gets both parts too; it is the zero for every row (no older-harness base is used).
+- **Order:** rows already finished or running get the two parts as an extra phase after the current row; the rest run them with their other parts. If time gets tight, drop `B2_rand_steer`'s `tv_corr_mt6` first.
+- **Report:** a block-B table with `tv_corr` and `tv_corr_mt6` next to `tv_vb`/`tv_vb_mt6`/MBPP; the `corrupted` first-copy hazard at mt6 (delay vs removal, as for `verifier_bug`); and an explicit **A3 vs F4_worst** paired comparison on every fresh-task metric. Do **not** re-run the adoption step on block-B data (selection must not use the final test sets): the adoption label stays as decided at 09:08. The A3 vs F4_worst comparison is reported for the user to decide.
