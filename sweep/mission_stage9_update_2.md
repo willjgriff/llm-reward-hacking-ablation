@@ -173,3 +173,17 @@ A3 and F4_worst differ only on `corrupted` (2.0 vs 7.5 % at mt4 on the reused id
 - **Base:** `B2_base` gets both parts too; it is the zero for every row (no older-harness base is used).
 - **Order:** rows already finished or running get the two parts as an extra phase after the current row; the rest run them with their other parts. If time gets tight, drop `B2_rand_steer`'s `tv_corr_mt6` first.
 - **Report:** a block-B table with `tv_corr` and `tv_corr_mt6` next to `tv_vb`/`tv_vb_mt6`/MBPP; the `corrupted` first-copy hazard at mt6 (delay vs removal, as for `verifier_bug`); and an explicit **A3 vs F4_worst** paired comparison on every fresh-task metric. Do **not** re-run the adoption step on block-B data (selection must not use the final test sets): the adoption label stays as decided at 09:08. The A3 vs F4_worst comparison is reported for the user to decide.
+
+## Addendum 6 (user, 2026-10-24 10:40 UTC): finish early — trimmed block B, J-lens, report, stop
+
+The next step is testing the winning edits in more realistic environments (CheatBench etc.) on a different box; time and money on this one should go only to what is needed before that.
+
+- **Block B, trimmed to four rows:** `B2_base`, `B2_G_steer`, `B2_F4_worst`, `B2_A3_G_L30`, each with all their parts incl. addendum 5's `tv_corr` / `tv_corr_mt6`.
+  - **Drop** `B2_rand_steer` and `B2_G_centred`. If one of them is running when you read this, let it finish its current part, keep what it produced, and skip the rest.
+- **Skip blocks C and D** entirely (sample efficiency, clean-MBPP / djinn capability rows). Log them as "not run, user decision 2026-10-24".
+- **Keep block E (J-lens)** as planned. Directions: G9, F4_worst, A3's direction (= G9 at L30–63; note it is the same vector as G9, only the window differs), T-corr9, G13, with R1 and a random direction as anchors; generic + TV / MBPP / Grader prompt sets.
+- **Then the final report**:
+  - SUMMARY with the block-B table (incl. the A3 vs F4_worst paired comparison for the user) and the J-lens readout;
+  - the master table and significance;
+  - **uploads of every direction file and recipe needed to rebuild `U_G_steer`, `CONF_A3_G_L30` and `CONF_F4_worst`** (direction safetensors, α values, windows, the `vllm_resid_bias` plugin is in the code upload): a short `stage9/RECIPES.md` with exact rebuild commands.
+- **Then** upload verification, credential removal and **self-stop**.
