@@ -152,7 +152,7 @@ PORT=8000
 MAX_MODEL_LEN=131072
 GPU_MEMORY_UTILIZATION=0.92
 MAX_NUM_SEQS=64
-SPEC_CONFIG={"method": "mtp", "num_speculative_tokens": 3}
+SPEC_CONFIG='{"method": "mtp", "num_speculative_tokens": 3}'
 EOF
   chmod 600 "$CONF"
 fi
