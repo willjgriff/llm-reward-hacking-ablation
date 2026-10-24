@@ -33,7 +33,7 @@ BOX_HOST="${BOX_HOST:-}"
 BOX_PORT="${BOX_PORT:-22}"
 BOX_USER="${BOX_USER:-root}"
 VLLM_PORT="${VLLM_PORT:-8000}"
-SERVED_MODEL="${SERVED_MODEL:-Qwen/Qwen3.8-27B}"   # must match vLLM's model name on the box
+SERVED_MODEL="${SERVED_MODEL:-cb_base}"   # the row the GPU box serves after cheatbench/gpubox_setup.sh
 CB_REPO="${CB_REPO:-https://github.com/centerforaisafety/cheatbench}"
 CB_COMMIT="${CB_COMMIT:-1bd70d4f7509966e069ef602e5c4df77d66d2802}"   # read 2026-10-23
 ENROOT_VERSION="${ENROOT_VERSION:-4.2.1}"
@@ -119,10 +119,11 @@ sudo -u "$RUN_USER" unshare --user --map-root-user --mount --pid --fork --mount-
 echo "unprivileged namespaces ok for $RUN_USER"
 chmod 700 /root
 install -d -m 700 /root/.config /root/.config/rhablation
-for p in /root /root/.config/rhablation/upload.env "$TUNNEL_DIR/id_ed25519" /usr/local/sbin/request-gpubox-stop; do
+for p in /root /root/.config/rhablation/upload.env "$TUNNEL_DIR/id_ed25519" /usr/local/sbin/request-gpubox-stop \
+         /usr/local/sbin/request-gpubox-row; do
   if sudo -u "$RUN_USER" test -r "$p" 2>/dev/null && [ -e "$p" ]; then die "$RUN_USER can read $p"; fi
 done
-echo "ok   $RUN_USER cannot read /root (upload token, Claude login, done key) or the tunnel key"
+echo "ok   $RUN_USER cannot read /root (upload token, Claude login, done and row keys) or the tunnel key"
 [ -f /root/.config/rhablation/upload.env ] \
   || echo "NOTE: /root/.config/rhablation/upload.env missing: copy it from the laptop before an unattended run"
 
@@ -130,7 +131,8 @@ step "Tunnel to the GPU box"
 # The address the box sees this VM connect from (the box key is restricted to it).
 VM_IP="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "src") print $(i + 1)}')"
 DONE_KEY=/root/.ssh/gpubox_done
-allow_cmd() { echo "FROM=$VM_IP DONE_KEY='$(cat "$DONE_KEY.pub")' bash cheatbench/allow_tunnel_key.sh '$(cat "$TUNNEL_DIR/id_ed25519.pub")'"; }
+ROW_KEY=/root/.ssh/gpubox_row
+allow_cmd() { echo "FROM=$VM_IP DONE_KEY='$(cat "$DONE_KEY.pub")' ROW_KEY='$(cat "$ROW_KEY.pub")' bash cheatbench/allow_tunnel_key.sh '$(cat "$TUNNEL_DIR/id_ed25519.pub")'"; }
 if [ -z "$BOX_HOST" ]; then
   echo "BOX_HOST not set: skipping (re-run with BOX_HOST/BOX_PORT to add it)"
 else
@@ -189,6 +191,21 @@ exec ssh -T -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes 
   -p "$BOX_PORT" "$BOX_USER@$BOX_HOST"
 EOF
   chmod 700 /usr/local/sbin/request-gpubox-stop
+  # Third key, root's: the box runs cheatbench/serve_row.sh with the row named here and nothing else.
+  [ -f "$ROW_KEY" ] || ssh-keygen -q -t ed25519 -N '' -C "gpubox-row@$(hostname)" -f "$ROW_KEY"
+  cat > /usr/local/sbin/request-gpubox-row <<'EOF'
+#!/usr/bin/env bash
+# Make the GPU box serve one CheatBench eval row, or report what it serves. Run as root, with no episode running:
+#   request-gpubox-row base|a3|rand|status
+# Blocks until the row answers (a few minutes, at most 20). Exit 3: requests still in flight on the box.
+set -euo pipefail
+case "${1:-}" in base|a3|rand|status) ;; *) echo "usage: request-gpubox-row base|a3|rand|status" >&2; exit 2 ;; esac
+. /etc/rhtunnel/box.env
+exec ssh -T -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ServerAliveInterval=30 \
+  -o UserKnownHostsFile=/etc/rhtunnel/known_hosts -i /root/.ssh/gpubox_row \
+  -p "$BOX_PORT" "$BOX_USER@$BOX_HOST" "$1"
+EOF
+  chmod 700 /usr/local/sbin/request-gpubox-row
 fi
 
 step "CheatBench @ ${CB_COMMIT:0:7}"
@@ -200,27 +217,35 @@ sudo -u "$RUN_USER" git -C "$CB_DIR" checkout -q "$CB_COMMIT"
 [ -x "$CB_DIR/.venv/bin/python" ] || as_run "python3 -m venv .venv"
 as_run ".venv/bin/pip install -q --upgrade pip && .venv/bin/pip install -q -e '.[build,svgs]'"
 
-step "Model entry and .env"
-# Our entry on top of the upstream file (judge/other entries stay resolvable). `vllm/` is not one
-# of CheatBench's vendor prefixes, so core/model_settings.factory_model() routes it through the
-# OpenAI client and sends "$SERVED_MODEL" to api_base_url. Reasoning effort goes in through the
-# Qwen3.8 chat template, as in our rh-envs configs.
+step "Model entries and .env"
+# One entry per eval row (cb-base, cb-a3, cb-rand) on top of the upstream file (judge/other entries stay
+# resolvable). `vllm/` is not one of CheatBench's vendor prefixes, so core/model_settings.factory_model() routes it
+# through the OpenAI client and sends the served name (cb_<row>, cheatbench/serve_row.sh) to api_base_url.
+# Sampling = our rh-envs Qwen3.8 configs (terminal_verifier/qwen3.8_sweep, mbpp/impossible_qwen3.8_sweep), behind
+# every stage-9 number: temperature 1, top_p 1, no top_k, 8192 tokens per call, reasoning effort low through the
+# chat template. Terminus-2 takes temperature and max_tokens as generation settings; top_p/top_k go in the body.
 models_local="$CB_DIR/configs/models.local.yaml"
 {
   cat "$CB_DIR/configs/models.yaml"
-  cat <<EOF
-
-# --- added by llm-reward-hacking-ablation cheatbench/setup_cpu_vm.sh ---
-qwen3.8-27b-low:
-  model: vllm/$SERVED_MODEL
+  printf '\n# --- added by llm-reward-hacking-ablation cheatbench/setup_cpu_vm.sh ---\n'
+  for row in base a3 rand; do
+    cat <<EOF
+cb-$row:
+  model: vllm/cb_$row
   api_key_env: VLLM_API_KEY
   api_base_url: \${VLLM_BASE_URL}
+  generation_config:
+    temperature: 1.0
+    max_tokens: 8192
   extra_body:
+    top_p: 1.0
+    top_k: -1
     chat_template_kwargs:
       reasoning_effort: low
   harness:
     name: terminus-2
 EOF
+  done
 } > "$models_local"
 chown "$RUN_USER:$RUN_USER" "$models_local"
 install -m 600 -o "$RUN_USER" -g "$RUN_USER" /dev/stdin "$CB_DIR/.env" <<EOF
@@ -255,7 +280,7 @@ fi
 
 if [ "$SMOKE" = 1 ]; then
   step "Smoke run: prime_factorization, 1 episode, no judge"
-  as_run ".venv/bin/python run.py prime_factorization --model qwen3.8-27b-low \
+  as_run ".venv/bin/python run.py prime_factorization --model cb-base \
     --models-config configs/models.local.yaml --limit 1 --max-concurrent 1 --no-judge \
     --run-id smoke-qwen-pf"
   ls -la "$CB_DIR/outputs/"*smoke-qwen-pf* 2>/dev/null || true
@@ -265,7 +290,7 @@ step "Done"
 cat <<EOF
 Run episodes as $RUN_USER, never as root:
   sudo -u $RUN_USER -H bash -c 'cd $CB_DIR && .venv/bin/python run.py TASK \\
-    --model qwen3.8-27b-low --models-config configs/models.local.yaml --no-judge --max-concurrent N'
+    --model cb-base --models-config configs/models.local.yaml --no-judge --max-concurrent N'
 Outputs: $CB_DIR/outputs/. Judge later, off this VM. Upload a finished run as root:
   bash scripts/upload_run.sh --run-dir $CB_DIR/outputs/<run> --dest-prefix cheatbench
 Unattended: bash cheatbench/hetzner_claude.sh --mission cheatbench/<mission>.md

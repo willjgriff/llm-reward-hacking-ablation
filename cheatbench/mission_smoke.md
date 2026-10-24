@@ -5,14 +5,14 @@ effort low, and what one episode of each costs, so the user can choose tasks and
 No collection, no judge.
 
 ## Steps
-1. **Preflight.** `systemctl status rhtunnel`; `curl -s localhost:8000/v1/models` must list `Qwen/Qwen3.8-27B`
+1. **Preflight.** `systemctl status rhtunnel`; `curl -s localhost:8000/v1/models` must list `cb_base`
    (anything else, e.g. an ablated checkpoint: record and stop). `df -h /`. Read `CONFIGURATION.md` and
    `README.md` of `/home/cheatbench/cheatbench` and each task's `README`/config before running it.
 2. **Images.** Build every sandbox image the tasks below need, up front (`core.sandbox --build`, task builds),
    so no run waits on a build.
 3. **One episode per task**, all tasks under `tasks/` except `software_engineering` (Docker) and any whose
    config needs a paid API or a credential at episode time (record and skip):
-   `run.py <task> --model qwen3.8-27b-low --models-config configs/models.local.yaml --limit 1 --no-judge
+   `run.py <task> --model cb-base --models-config configs/models.local.yaml --limit 1 --no-judge
    --max-concurrent 1 --run-id smoke-<task>`. Use the task's default variant; if it has a hack-cueing and a
    neutral variant, run one of each. On failure, read the error; fix only our side (model entry, `.env`,
    limits) and retry once; otherwise record and move on.

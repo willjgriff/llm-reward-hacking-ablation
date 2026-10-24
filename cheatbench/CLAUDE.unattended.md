@@ -11,8 +11,11 @@ rules apply on this VM only and override the project `CLAUDE.md` wherever the tw
   started by that user.
 - The model is served by vLLM on a separate GPU box (Vast). This VM reaches it at
   `http://127.0.0.1:8000/v1` through the systemd service `rhtunnel` (autossh, port forward only). You have no
-  shell on the GPU box and cannot start, stop or change its vLLM; if the endpoint is down or serves the wrong
-  model, record it and stop.
+  shell on the GPU box. The only thing you can change there is which eval row vLLM serves:
+  `request-gpubox-row base|a3|rand|status` (root; served names `cb_base`, `cb_a3`, `cb_rand`; model entries
+  `cb-base`, `cb-a3`, `cb-rand`). Switch only when the mission says so and only with no episode running (it
+  refuses with exit 3 while requests are in flight). Before every run, check that `/v1/models` lists the row that
+  run's model entry names; if it does not, or the endpoint is down and a switch does not fix it, record it and stop.
 - The GPU box stops itself after its watchdog window with no vLLM request in flight, or earlier when you
   run `request-gpubox-stop` in the final step. A long pause between
   episodes (hours) can therefore lose the box; keep runs back to back, and build sandbox images before the
@@ -30,7 +33,7 @@ rules apply on this VM only and override the project `CLAUDE.md` wherever the tw
 ## Safety on this VM (not negotiable)
 - **Every CheatBench command runs as `cheatbench`**:
   `sudo -u cheatbench -H bash -c 'cd /home/cheatbench/cheatbench && .venv/bin/python run.py ...'`. Never as root.
-- Always `--no-judge`, and the `qwen3.8-27b-low` model entry from `configs/models.local.yaml`. **No paid APIs**:
+- Always `--no-judge`, and the `cb-*` model entries from `configs/models.local.yaml`. **No paid APIs**:
   no OpenRouter, OpenAI, Anthropic or other keys are created, requested or used; CheatBench's `.env` holds the
   vLLM URL only.
 - `cheatbench` must never be able to read a credential: nothing from `/root` is copied into its home; no
