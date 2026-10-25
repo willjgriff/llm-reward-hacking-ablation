@@ -155,7 +155,7 @@ def run_config_summary(run_json: Path) -> dict[str, Any] | None:
         return None
     return {
         "run_id": rc.get("run_id"),
-        "created": None,
+        "created": rc.get("started"),
         "model": rc.get("model_id"),
         "model_revision": None,
         "benchmark": "cheatbench",
