@@ -71,7 +71,7 @@ def make_handler(data_root: Path, store: viewer.IndexStore, judge: dict) -> type
                 elif url.path == "/api/trajectory":
                     path = viewer.run_file(data_root, q["run"], store.extra_roots)
                     rec = viewer.load_record(path, int(q["i"]), int(q.get("offset", -1)))
-                    self._json(viewer.detail(rec, judge))
+                    self._json(viewer.detail(rec, judge, store.side_labels))
                 else:
                     self._json({"error": "not found"}, HTTPStatus.NOT_FOUND)
             except (KeyError, ValueError, FileNotFoundError, IndexError) as e:
@@ -95,7 +95,7 @@ def main() -> None:
         sys.exit(f"data root not found: {data_root}")
     extra_roots = dict(args.extra_root)
     cache_dir = (args.cache_dir or data_root / ".viewer_cache").resolve()
-    store = viewer.IndexStore(data_root, cache_dir, extra_roots)
+    store = viewer.IndexStore(data_root, cache_dir, extra_roots, viewer.load_side_labels(data_root))
     judge = viewer.load_judge_labels(data_root)
     runs = viewer.discover_runs(data_root, extra_roots)
     extra = "".join(f"; {sum(r['id'].startswith(k + '/') for r in runs)} ortho files under {k}={v}" for k, v in extra_roots.items())

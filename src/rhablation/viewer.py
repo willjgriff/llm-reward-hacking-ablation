@@ -4,7 +4,9 @@ Pure functions plus one small in-memory/on-disk index store. Served by scripts/t
 Reads trajectories.jsonl[.gz] (schema 1.0-1.3, full or compact) without touching any run directory:
 the row index is cached under a separate cache dir, keyed by file path, size and mtime. Extra roots
 in the ortho layout (`<root>/inspect/<env>/<log>.jsonl`, records of Ethan's `envs/convert.py`) are
-read through `rhablation.ortho_records`, one file per run.
+read through `rhablation.ortho_records`, one file per run. CheatBench runs (`<run>/episodes.jsonl` + `run.json`)
+are read through `rhablation.cheatbench_records`; their judge verdicts and provisional labels are joined from
+side files (`side_labels`).
 """
 
 import gzip
@@ -16,6 +18,7 @@ import threading
 from pathlib import Path
 from typing import Any, BinaryIO, Iterator
 
+from rhablation import cheatbench_records as cb
 from rhablation.hack_signals import test_file_writes
 from rhablation.judge_transcript import _turns_by_message, render as render_plain
 from rhablation.ortho_records import is_ortho_record, normalize, with_rendered_system_turn
@@ -29,8 +32,9 @@ TRAJ_FILE_NAMES = (
     "trajectories.compact.jsonl.gz",
     "records.jsonl",
     "records.jsonl.gz",
+    cb.FILE_NAME,
 )
-RUN_FILE_GLOBS = ("trajectories*.jsonl*", "records.jsonl*")
+RUN_FILE_GLOBS = ("trajectories*.jsonl*", "records.jsonl*", cb.FILE_NAME)
 TOKEN_FIELDS = ("prompt_token_ids", "completion_token_ids")
 SCORE_TO_REWARD = {"C": 1.0, "I": 0.0}
 # Second layout (Ethan's ortho repo): <extra root>/inspect/<env>/<inspect log name>.jsonl, one file = one run.
@@ -63,7 +67,7 @@ def discover_runs(data_root: Path, extra_roots: ExtraRoots | None = None) -> lis
                 "name": run_dir.name,
                 "file": chosen.name,
                 "bytes": chosen.stat().st_size,
-                "run_config": _run_config_summary(run_dir / "run_config.json"),
+                "run_config": cb.run_config_summary(run_dir / "run.json") if chosen.name == cb.FILE_NAME else _run_config_summary(run_dir / "run_config.json"),
             }
         )
     for name, root in (extra_roots or {}).items():
@@ -95,8 +99,12 @@ def _discover_ortho(name: str, root: Path) -> list[dict[str, Any]]:
 def group_of(rel: Path) -> str:
     """Sidebar group of a run dir (relative to the data root): its parent path, except under stage6/, whose layout
     is stage6/<checkpoint>/<run> (stages 5b-5e, run names s5b_..s5e_) or stage6/<checkpoint>/rhenvs/<run> (stage 7).
-    There the group is stage6/<mission>/<checkpoint>, so one mission's checkpoints share a collection."""
+    There the group is stage6/<mission>/<checkpoint>, so one mission's checkpoints share a collection. A CheatBench
+    run dir (<task>_cb-<row>_<run id>) is grouped by its row: <parent>/<row>."""
     parts = rel.parts
+    m = re.match(r".+_cb-([^_]+)_[^_]+$", parts[-1])
+    if m and "cheatbench" in rel.as_posix():
+        return f"{rel.parent.as_posix()}/{m[1]}"
     if len(parts) >= 3 and parts[0] == "stage6":
         if parts[2] == "rhenvs":
             return f"stage6/stage7/{parts[1]}"
@@ -241,11 +249,32 @@ def load_record(path: Path, index: int, offset: int) -> dict[str, Any]:
     if offset >= 0:
         with _open_binary(path) as f:
             f.seek(offset)
-            return json.loads(f.readline())
+            rec = json.loads(f.readline())
+        if path.name == cb.FILE_NAME and cb.is_cheatbench_record(rec):
+            _annotate_cheatbench(rec, path, _cheatbench_attempt(path, offset, rec["episode"]))
+        return rec
     for n, rec in enumerate(_decode_concatenated(path)):
         if n == index:
             return rec
     raise IndexError(index)
+
+
+def _cheatbench_attempt(path: Path, offset: int, episode: str) -> int:
+    """The attempt number of the record at `offset`: 1 + earlier lines of the same episode."""
+    with _open_binary(path) as f:
+        head = f.read(offset)
+    return 1 + sum(json.loads(line).get("episode") == episode for line in head.splitlines() if line.strip())
+
+
+def _annotate_cheatbench(rec: dict[str, Any], path: Path, attempt: int) -> None:
+    rec["_viewer_run"] = path.parent.name
+    rec["_viewer_attempt"] = attempt
+
+
+def _normalize(rec: dict[str, Any]) -> dict[str, Any]:
+    if "_viewer_run" in rec and cb.is_cheatbench_record(rec):
+        return cb.to_trajectory(rec, rec["_viewer_run"], rec["_viewer_attempt"])
+    return normalize(rec)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -254,7 +283,7 @@ def load_record(path: Path, index: int, offset: int) -> dict[str, Any]:
 
 def summarize_record(rec: dict[str, Any]) -> dict[str, Any]:
     """The per-rollout row shown in the table. Every hack signal stays its own column."""
-    rec = normalize(rec)
+    rec = _normalize(rec)
     rt = rec.get("raw_test_results") or {}
     labels = {k: (v or {}).get("value") for k, v in (rec.get("labels") or {}).items()}
     score = (rec.get("score") or {}).get("value")
@@ -323,8 +352,9 @@ def row_matches(row: dict[str, Any], q: str) -> bool:
 class IndexStore:
     """Builds and caches one row index per run file. Builds run in a background thread."""
 
-    def __init__(self, data_root: Path, cache_dir: Path, extra_roots: ExtraRoots | None = None):
+    def __init__(self, data_root: Path, cache_dir: Path, extra_roots: ExtraRoots | None = None, side_labels: dict[str, dict[str, Any]] | None = None):
         self.data_root = data_root
+        self.side_labels = side_labels or {}
         self.cache_dir = cache_dir
         self.extra_roots = extra_roots or {}
         self._lock = threading.Lock()
@@ -332,6 +362,17 @@ class IndexStore:
         self._progress: dict[str, dict[str, Any]] = {}
         self._queue: list[tuple[str, Path]] = []  # runs waiting for the find worker
         self._worker: threading.Thread | None = None
+
+    def _with_side(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Rows with the side-table labels (judge verdicts, provisional reads) merged in at serve time, so the
+        cached index does not go stale when those files change."""
+        if not self.side_labels:
+            return rows
+        out = []
+        for r in rows:
+            extra = self.side_labels.get(r.get("trajectory_id"))
+            out.append({**r, "labels": {**(r.get("labels") or {}), **{k: v["value"] for k, v in extra.items()}}} if extra else r)
+        return out
 
     def _cache_path(self, path: Path) -> Path:
         return self.cache_dir / (hashlib.sha1(str(path.resolve()).encode()).hexdigest() + ".json")
@@ -341,11 +382,11 @@ class IndexStore:
         path = run_file(self.data_root, run_id, self.extra_roots)
         with self._lock:
             if run_id in self._ready:
-                return {"status": "ready", "rows": self._ready[run_id]}
+                return {"status": "ready", "rows": self._with_side(self._ready[run_id])}
             cached = self._load_cache(path)
             if cached is not None:
                 self._ready[run_id] = cached
-                return {"status": "ready", "rows": cached}
+                return {"status": "ready", "rows": self._with_side(cached)}
             if run_id not in self._progress:
                 self._progress[run_id] = {"rows": 0, "bytes": 0, "total_bytes": path.stat().st_size, "error": None}
                 threading.Thread(target=self._build, args=(run_id, path), daemon=True).start()
@@ -386,7 +427,7 @@ class IndexStore:
                 missing.append((run_id, path))
                 continue
             for q in queries:
-                matches.extend({"query": q, **r} for r in rows if row_matches(r, q))
+                matches.extend({"query": q, **r} for r in self._with_side(rows) if row_matches(r, q))
         if missing:
             self._queue_builds(missing)
         return {"queries": queries, "scope": scope, "matches": matches, "searched": len(scope or all_ids) - len(missing) - len(failed), "pending": len(missing), "failed": failed}
@@ -415,8 +456,12 @@ class IndexStore:
 
     def _build(self, run_id: str, path: Path) -> None:
         rows: list[dict[str, Any]] = []
+        attempts: dict[str, int] = {}
         try:
             for n, offset, rec in iter_records(path):
+                if path.name == cb.FILE_NAME and cb.is_cheatbench_record(rec):
+                    attempts[rec["episode"]] = attempts.get(rec["episode"], 0) + 1
+                    _annotate_cheatbench(rec, path, attempts[rec["episode"]])
                 row = summarize_record(rec)
                 row.update({"run": run_id, "i": n, "offset": offset})
                 rows.append(row)
@@ -440,9 +485,18 @@ class IndexStore:
 # Judge labels (stage 3)
 
 
+def load_side_labels(data_root: Path) -> dict[str, dict[str, Any]]:
+    """trajectory_id -> extra labels joined from side files: CheatBench judge verdicts and provisional reads."""
+    out: dict[str, dict[str, Any]] = {}
+    for table in (cb.provisional_labels(data_root), cb.judge_side_labels(cb.judge_records(data_root))):
+        for tid, labels in table.items():
+            out.setdefault(tid, {}).update(labels)
+    return out
+
+
 def load_judge_labels(data_root: Path) -> dict[str, list[dict[str, Any]]]:
-    """trajectory_id -> judge verdicts from every data/stage3/**/labels.jsonl."""
-    out: dict[str, list[dict[str, Any]]] = {}
+    """trajectory_id -> judge verdicts from every data/stage3/**/labels.jsonl and data/cheatbench_judge/."""
+    out: dict[str, list[dict[str, Any]]] = cb.judge_entries(cb.judge_records(data_root))
     stage3 = data_root / "stage3"
     if not stage3.exists():
         return out
@@ -510,6 +564,8 @@ def structure_transcript(rec: dict[str, Any]) -> list[dict[str, Any]]:
 def strip_bulk(rec: dict[str, Any]) -> dict[str, Any]:
     """The record without token ids and rendered strings, for the raw-JSON tab. An ortho record is shown as
     stored (its own keys), minus `ids` and `items`."""
+    if cb.is_cheatbench_record(rec):
+        return cb.strip_bulk({k: v for k, v in rec.items() if not k.startswith("_viewer_")})
     out = dict(rec)
     if "ids" in out and "items" in out:
         out["ids"] = f"<{len(rec.get('ids') or [])} ids omitted>" if rec.get("ids") is not None else None
@@ -544,9 +600,12 @@ def _decoder(model: str | None):
     return _TOKENIZERS[name]
 
 
-def detail(rec: dict[str, Any], judge: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
+def detail(rec: dict[str, Any], judge: dict[str, list[dict[str, Any]]], side_labels: dict[str, dict[str, Any]] | None = None) -> dict[str, Any]:
     raw = rec
-    rec = normalize(rec)
+    rec = _normalize(rec)
+    extra = (side_labels or {}).get(rec.get("trajectory_id"))
+    if extra:
+        rec = {**rec, "labels": {**(rec.get("labels") or {}), **extra}}
     if is_ortho_record(raw):
         decode = _decoder(raw.get("model"))
         if decode is not None:
