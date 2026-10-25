@@ -200,10 +200,10 @@ EOF
   cat > /usr/local/sbin/request-gpubox-row <<'EOF'
 #!/usr/bin/env bash
 # Make the GPU box serve one CheatBench eval row, or report what it serves. Run as root, with no episode running:
-#   request-gpubox-row base|a3|rand|status|vision-on|vision-off
+#   request-gpubox-row base|a3|a3half|a3quarter|g40|rand|status|vision-on|vision-off
 # Blocks until the row answers (a few minutes, at most 20). Exit 3: requests still in flight on the box.
 set -euo pipefail
-case "${1:-}" in base|a3|rand|status|vision-on|vision-off) ;; *) echo "usage: request-gpubox-row base|a3|rand|status|vision-on|vision-off" >&2; exit 2 ;; esac
+case "${1:-}" in base|a3|a3half|a3quarter|g40|rand|status|vision-on|vision-off) ;; *) echo "usage: request-gpubox-row base|a3|a3half|a3quarter|g40|rand|status|vision-on|vision-off" >&2; exit 2 ;; esac
 . /etc/rhtunnel/box.env
 exec ssh -T -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ServerAliveInterval=30 \
   -o UserKnownHostsFile=/etc/rhtunnel/known_hosts -i /root/.ssh/gpubox_row \
@@ -232,7 +232,7 @@ models_local="$CB_DIR/configs/models.local.yaml"
 {
   cat "$CB_DIR/configs/models.yaml"
   printf '\n# --- added by llm-reward-hacking-ablation cheatbench/setup_cpu_vm.sh ---\n'
-  for row in base a3 rand; do
+  for row in base a3 a3half a3quarter g40 rand; do
     cat <<EOF
 cb-$row:
   model: vllm/cb_$row
@@ -248,6 +248,7 @@ cb-$row:
       reasoning_effort: low
   harness:
     name: terminus-2
+    version: 4641fd590f190411c57e1cbd824a9f6786cbe92e   # Terminus-2's fixed Harbor revision; run.py refuses an unpinned entry
 EOF
   done
 } > "$models_local"
