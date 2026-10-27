@@ -44,7 +44,10 @@ def _text(message: Any) -> str:
         return message.get("text") or f"<{message.get('type')} content, elided>"
     chunks = []
     for part in message or []:
-        if isinstance(part, dict):
+        if isinstance(part, dict) and part.get("type") == "image":
+            src = str((part.get("source") or {}).get("path") or "")
+            chunks.append("<image, shown below>" if src.startswith("data:image/") else f"<image: {src}>")
+        elif isinstance(part, dict):
             src = (part.get("source") or {}).get("path")
             chunks.append(part.get("text") or (f"<{part.get('type')}: {src}>" if src else f"<{part.get('type')} content, elided>"))
         elif isinstance(part, str):
@@ -52,10 +55,24 @@ def _text(message: Any) -> str:
     return "\n".join(c for c in chunks if c)
 
 
+def _images(content: Any) -> list[str]:
+    """The inline images (data: URIs) of an ATIF content-part list; images given only as a path are not stored."""
+    if not isinstance(content, list):
+        return []
+    out = []
+    for part in content:
+        if isinstance(part, dict) and part.get("type") == "image":
+            src = str((part.get("source") or {}).get("path") or "")
+            if src.startswith("data:image/"):
+                out.append(src)
+    return out
+
+
 def _messages_and_turns(steps: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Our Message shape from ATIF steps. A result without `source_call_id` is the observation text Terminus-2
     sends back as the next user message (it already contains every call's output), so the per-call results of
-    that step are not repeated; a step with only per-call results gets them as tool messages."""
+    that step are not repeated, except for their images (Terminus-2 keeps those only in the per-call results),
+    which go on that user message; a step with only per-call results gets them as tool messages."""
     messages: list[dict[str, Any]] = []
     turns: list[dict[str, Any]] = []
     names: dict[str, str] = {}
@@ -66,7 +83,7 @@ def _messages_and_turns(steps: list[dict[str, Any]]) -> tuple[list[dict[str, Any
             for c in s.get("tool_calls") or []:
                 names[c.get("tool_call_id")] = c.get("function_name")
                 calls.append({"id": c.get("tool_call_id"), "function": c.get("function_name"), "arguments": c.get("arguments")})
-            messages.append({"role": "assistant", "content": _text(s.get("message")), "tool_calls": calls or None})
+            messages.append({"role": "assistant", "content": _text(s.get("message")), "tool_calls": calls or None, "images": _images(s.get("message"))})
             m = s.get("metrics") or {}
             turns.append(
                 {
@@ -79,15 +96,17 @@ def _messages_and_turns(steps: list[dict[str, Any]]) -> tuple[list[dict[str, Any
                 }
             )
         else:
-            messages.append({"role": "system" if source == "system" else "user", "content": _text(s.get("message"))})
+            messages.append({"role": "system" if source == "system" else "user", "content": _text(s.get("message")), "images": _images(s.get("message"))})
         results = (s.get("observation") or {}).get("results") or []
         plain = [r for r in results if not r.get("source_call_id")]
         for r in plain or results:
             err = bool((r.get("extra") or {}).get("is_error"))
             if r.get("source_call_id") and not plain:
-                messages.append({"role": "tool", "content": _text(r.get("content")), "function": names.get(r["source_call_id"], "tool"), "error": "is_error" if err else None})
+                messages.append({"role": "tool", "content": _text(r.get("content")), "function": names.get(r["source_call_id"], "tool"), "error": "is_error" if err else None, "images": _images(r.get("content"))})
             else:
-                messages.append({"role": "user", "content": _text(r.get("content"))})
+                messages.append({"role": "user", "content": _text(r.get("content")), "images": _images(r.get("content"))})
+        if plain:
+            messages[-1]["images"] += [img for r in results if r.get("source_call_id") for img in _images(r.get("content"))]
     return messages, turns
 
 
@@ -136,6 +155,18 @@ def to_trajectory(rec: dict[str, Any], run_name: str, attempt: int) -> dict[str,
         "duration_s": rec.get("wall_time"),
         "provenance": {"format": "cheatbench/episodes.jsonl", "run": run_name, "episode": rec.get("episode"), "attempt_index": attempt, "transcript_path": rec.get("transcript_path")},
     }
+
+
+IMAGE_SUFFIXES = {".svg": "image/svg+xml", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".gif": "image/gif"}
+
+
+def deliverables(run_dir: Path, episode: str) -> list[dict[str, Any]]:
+    """Image files the agent left in its deliverables dir (`trajectories/<episode>/deliverables/`). One dir per
+    episode, so a retried episode's attempts share it (it holds the files of the attempt that was uploaded)."""
+    d = run_dir / "trajectories" / episode / "deliverables"
+    if not d.is_dir():
+        return []
+    return [{"path": p.relative_to(run_dir).as_posix(), "name": p.name, "bytes": p.stat().st_size} for p in sorted(d.rglob("*")) if p.is_file() and p.suffix.lower() in IMAGE_SUFFIXES]
 
 
 def strip_bulk(rec: dict[str, Any]) -> dict[str, Any]:

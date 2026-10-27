@@ -94,6 +94,11 @@
   .msg.user .hd { color: var(--amber); }
   .msg.assistant .hd { color: var(--accent); }
   .msg.tool .hd { color: var(--purple); }
+  .imgs { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+  .imgs figure { margin: 0; }
+  .imgs img { max-width: 480px; max-height: 480px; border: 1px solid var(--line); background: #fff; cursor: zoom-in; }
+  .imgs img.big { max-width: 100%; max-height: none; cursor: zoom-out; }
+  .imgs figcaption { font-size: 11px; }
   .text { white-space: pre-wrap; word-break: break-word; font-family: var(--mono); font-size: 12px; }
   .text .cmd { background: color-mix(in srgb, var(--accent) 14%, transparent); border-radius: 3px; padding: 0 3px; }
   .text pre.code { background: var(--bg2); border: 1px solid var(--line); border-radius: 4px; padding: 6px 8px; margin: 4px 0; }
@@ -565,6 +570,10 @@ function renderTranscript(data) {
   if (data.abandoned_calls.length) {
     html += `<div class="section muted">${data.abandoned_calls.length} model call(s) abandoned by the client (no message produced): ` + data.abandoned_calls.map(a => `call ${a.turn_index}: ${esc(a.error)}`).join('; ') + '</div>';
   }
+  if (data.deliverables?.length) {
+    html += `<div class="section"><h3>deliverables (${data.deliverables.length} image file${data.deliverables.length > 1 ? 's' : ''} the agent left; shared by all attempts of this episode)</h3><div class="imgs">` +
+      data.deliverables.map(f => `<figure><img class="zoom" src="${esc(f.url)}" alt="${esc(f.name)}"><figcaption class="muted">${esc(f.name)} · ${fmtNum(f.bytes)} B</figcaption></figure>`).join('') + '</div></div>';
+  }
   let firstUser = true;
   for (const msg of data.transcript) {
     const role = msg.role;
@@ -581,6 +590,7 @@ function renderTranscript(data) {
       body += `<details class="reason" ${state.collapseReasoning ? '' : 'open'}><summary>reasoning · ${fmtNum(msg.reasoning.length)} chars (model-internal)</summary><div class="text">${renderText(msg.reasoning)}</div></details>`;
     }
     if (msg.content) body += `<div class="text">${renderText(msg.content)}</div>`;
+    if (msg.images?.length) body += `<div class="imgs">${msg.images.map(src => `<img class="zoom" src="${esc(src)}">`).join('')}</div>`;
     for (const tc of msg.tool_calls) {
       let args = tc.arguments;
       if (typeof args === 'string') { try { args = JSON.parse(args); } catch (e) {} }
@@ -593,6 +603,7 @@ function renderTranscript(data) {
   return html;
 }
 function wireTranscript() {
+  $('#tab').querySelectorAll('img.zoom').forEach(i => i.onclick = () => i.classList.toggle('big'));
   $('#collapse').onchange = e => { state.collapseReasoning = e.target.checked; $('#tab').querySelectorAll('details.reason').forEach(d => d.open = !state.collapseReasoning); };
 }
 
