@@ -268,7 +268,18 @@ def _cheatbench_attempt(path: Path, offset: int, episode: str) -> int:
 
 def _annotate_cheatbench(rec: dict[str, Any], path: Path, attempt: int) -> None:
     rec["_viewer_run"] = path.parent.name
+    rec["_viewer_path"] = str(path)
     rec["_viewer_attempt"] = attempt
+
+
+def deliverable_file(data_root: Path, run_id: str, rel: str) -> tuple[bytes, str]:
+    """(bytes, content type) of an image file under a CheatBench run's trajectories/*/deliverables/."""
+    run_dir = (data_root / run_id).resolve()
+    p = (run_dir / rel).resolve()
+    ctype = cb.IMAGE_SUFFIXES.get(p.suffix.lower())
+    if data_root.resolve() not in run_dir.parents or run_dir not in p.parents or "deliverables" not in p.relative_to(run_dir).parts or ctype is None or not p.is_file():
+        raise FileNotFoundError(f"no deliverable image {rel} in {run_id}")
+    return p.read_bytes(), ctype
 
 
 def _normalize(rec: dict[str, Any]) -> dict[str, Any]:
@@ -543,6 +554,7 @@ def structure_transcript(rec: dict[str, Any]) -> list[dict[str, Any]]:
             "function": m.get("function"),
             "error": m.get("error"),
             "rendered": bool(m.get("rendered")),
+            "images": m.get("images") or [],
         }
         if m.get("role") == "assistant":
             step += 1
@@ -638,6 +650,7 @@ def detail(rec: dict[str, Any], judge: dict[str, list[dict[str, Any]]], side_lab
         ],
         "hack_signals": {"test_file_writes": test_file_writes(turns)},
         "judge": judge.get(rec.get("trajectory_id"), []),
+        "deliverables": cb.deliverables(Path(raw["_viewer_path"]).parent, raw["episode"]) if "_viewer_path" in raw else [],
         "plain": plain,
         "raw": strip_bulk(raw),
     }

@@ -20,7 +20,7 @@ import sys
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urlencode, urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
@@ -68,10 +68,16 @@ def make_handler(data_root: Path, store: viewer.IndexStore, judge: dict) -> type
                     self._json(store.get(q["run"]))
                 elif url.path == "/api/find":
                     self._json(store.find(q.get("q", "")))
+                elif url.path == "/api/file":
+                    body, ctype = viewer.deliverable_file(data_root, q["run"], q["path"])
+                    self._send(HTTPStatus.OK, body, ctype)
                 elif url.path == "/api/trajectory":
                     path = viewer.run_file(data_root, q["run"], store.extra_roots)
                     rec = viewer.load_record(path, int(q["i"]), int(q.get("offset", -1)))
-                    self._json(viewer.detail(rec, judge, store.side_labels))
+                    d = viewer.detail(rec, judge, store.side_labels)
+                    for f in d["deliverables"]:
+                        f["url"] = "/api/file?" + urlencode({"run": q["run"], "path": f["path"]})
+                    self._json(d)
                 else:
                     self._json({"error": "not found"}, HTTPStatus.NOT_FOUND)
             except (KeyError, ValueError, FileNotFoundError, IndexError) as e:
