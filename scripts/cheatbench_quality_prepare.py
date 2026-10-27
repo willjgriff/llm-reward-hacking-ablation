@@ -16,7 +16,7 @@ no image input; user decision 2026-10-27) and read by cheatbench_quality_report.
   so there is almost no base counterpart to pair with. Only `to_send/` is scored; a .docx/.pptx with a PDF
   of the same stem is scored as the PDF; Office files are converted by a local LibreOffice
   (`--soffice`, run headless with a throwaway profile), pages rendered at 110 DPI (at most --max-pages),
-  text extracted. Brief = the GDPval prompt (inputs/ paths as the agent saw them), input files as text.
+  text extracted. Brief = the GDPval prompt (inputs/ paths as the agent saw them), input files as text (.docx/.pptx from their XML, images as PNG).
   Copied deliverables are `excluded`, episodes with nothing in `to_send/` are `missing`; both are counted
   in the manifest, not judged.
 
@@ -100,7 +100,23 @@ def to_pdf(src: Path, soffice: str, workdir: Path) -> Path:
     return pdf
 
 
-def input_text(path: Path, soffice: str, workdir: Path, cap: int) -> str:
+def office_xml_text(path: Path) -> str:
+    """Text of a .docx/.pptx from its XML parts (paragraph breaks kept); no Office process involved."""
+    import zipfile  # noqa: PLC0415
+    with zipfile.ZipFile(path) as z:
+        names = sorted(n for n in z.namelist() if re.fullmatch(r"word/document\.xml|ppt/slides/slide\d+\.xml", n))
+        names.sort(key=lambda n: int(re.sub(r"\D", "", n) or 0))
+        parts = []
+        for n in names:
+            xml = z.read(n).decode("utf-8", "replace")
+            xml = re.sub(r"</w:p>|</a:p>", "\n", xml)
+            parts.append(re.sub(r"<[^>]+>", "", xml))
+    import html  # noqa: PLC0415
+    return html.unescape("\n\n".join(parts))
+
+
+def input_text(path: Path, cap: int) -> str | bytes:
+    """An input file as text for the judge, or PNG bytes for an image input."""
     suffix = path.suffix.lower()
     try:
         if suffix in (".xlsx", ".xls", ".csv"):
@@ -110,11 +126,19 @@ def input_text(path: Path, soffice: str, workdir: Path, cap: int) -> str:
         elif suffix == ".pdf":
             import pymupdf  # noqa: PLC0415
             text = "\n\n".join(p.get_text() for p in pymupdf.open(path))
-        elif suffix in (".docx", ".pptx", ".doc", ".ppt"):
-            import pymupdf  # noqa: PLC0415
-            text = "\n\n".join(p.get_text() for p in pymupdf.open(to_pdf(path, soffice, workdir)))
+        elif suffix in (".docx", ".pptx"):
+            text = office_xml_text(path)
+        elif suffix in (".png", ".jpg", ".jpeg", ".webp", ".gif"):
+            import io  # noqa: PLC0415
+            from PIL import Image  # noqa: PLC0415
+            buf = io.BytesIO()
+            Image.open(path).convert("RGB").save(buf, "PNG")
+            return buf.getvalue()
         else:
-            text = path.read_text(errors="replace")
+            raw = path.read_bytes()
+            if b"\0" in raw[:4096]:
+                return f"(binary {suffix} file, {len(raw)} bytes; not shown)"
+            text = raw.decode("utf-8", "replace")
     except Exception as e:  # noqa: BLE001
         text = f"(could not extract: {type(e).__name__}: {e})"
     return text if len(text) <= cap else text[:cap] + f"\n[... truncated at {cap} of {len(text)} characters ...]"
@@ -140,7 +164,7 @@ def main() -> None:
     p.add_argument("--rubric", type=Path, default=RUBRIC)
     p.add_argument("--soffice", default=str(Path.home() / "opt" / "lo" / "soffice-local"))
     p.add_argument("--dpi", type=int, default=110)
-    p.add_argument("--max-pages", type=int, default=15)
+    p.add_argument("--max-pages", type=int, default=25)
     p.add_argument("--text-cap", type=int, default=20000)
     p.add_argument("--reps", type=int, default=2, help="judgements per knowledge_work deliverable")
     p.add_argument("--seed", type=int, default=0)
@@ -155,7 +179,7 @@ def main() -> None:
     work = Path(tempfile.mkdtemp(prefix="cbq-"))
     manifest = []
 
-    def write_unit(task: str, deliverables: list[dict], brief: str, meta: dict, inputs: dict[str, str] | None = None) -> None:
+    def write_unit(task: str, deliverables: list[dict], brief: str, meta: dict, inputs: dict[str, str | bytes] | None = None) -> None:
         u = uid(task, meta["mode"], *(d["episode_ref"] for d in deliverables), str(meta.get("order", "")), str(meta.get("rep", "")))
         d_unit = args.out / "units" / u
         d_unit.mkdir()
@@ -169,9 +193,12 @@ def main() -> None:
             listing.append(f"Deliverable {label}: {d['note']}\n" + "\n".join(f"  - {d_unit / f}" for f in files))
         if inputs:
             (d_unit / "inputs").mkdir()
-            for name, text in inputs.items():
-                (d_unit / "inputs" / f"{name}.txt").write_text(text)
-            brief += "\n\nThe input files the brief refers to, as text:\n" + "\n".join(f"  - {d_unit / 'inputs' / (n + '.txt')}" for n in inputs)
+            shown = []
+            for name, content in inputs.items():
+                f = d_unit / "inputs" / (f"{name}.png" if isinstance(content, bytes) else f"{name}.txt")
+                f.write_bytes(content) if isinstance(content, bytes) else f.write_text(content)
+                shown.append(f)
+            brief += "\n\nThe input files the brief refers to (as text, images as PNG):\n" + "\n".join(f"  - {f}" for f in shown)
         prompt = (template.replace("{{DELIVERABLE_KIND}}", kind).replace("{{N}}", str(len(deliverables)))
                   .replace("{{CRITERIA}}", crit).replace("{{BRIEF}}", brief).replace("{{DELIVERABLES}}", "\n\n".join(listing)))
         (d_unit / "prompt.md").write_text(prompt)
@@ -226,7 +253,7 @@ def main() -> None:
     gdp["key8"] = gdp.task_id.str[:8]
     kw = first_attempts(args.metrics, "knowledge_work")
     v1 = v1_verdicts(args.v1_judge_dir, TASK_DIRS["knowledge_work"])
-    input_cache: dict[str, dict[str, str]] = {}
+    input_cache: dict[str, dict[str, str | bytes]] = {}
     for (row, key), m in sorted(kw.items()):
         meta = m["metrics"]
         v = v1.get((row, key, m["attempt_index"]), {})
@@ -247,7 +274,7 @@ def main() -> None:
         brief = g.prompt.replace("reference_files/", "inputs/")
         if key not in input_cache:
             refs = g.reference_files if not isinstance(g.reference_files, str) else ast.literal_eval(g.reference_files)
-            input_cache[key] = {Path(r).name: input_text(args.gdpval / r, args.soffice, work, args.text_cap) for r in refs}
+            input_cache[key] = {Path(r).name: input_text(args.gdpval / r, args.text_cap) for r in refs}
         out_files, notes = [], []
         for f in files:
             stem = uid(row, key, f.name)

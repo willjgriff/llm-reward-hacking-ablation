@@ -31,5 +31,6 @@ allow-direct-references = true
 [dependency-groups]
 render = [
     "cairosvg>=2.9.1",
+    "openpyxl>=3.1.5",
     "pymupdf>=2.0",
 ]
