@@ -242,16 +242,17 @@ _JUDGE_META = {
     "id", "episode", "attempt_index", "replicate", "task", "row", "model", "record_ok", "record_failure", "judge", "judge_prompt",
     "judge_schema", "parse_ok", "reasoning", "output_mode", "judge_cost_usd", "judge_usage", "judge_attempts", "provider", "model_used",
     "effort", "reasoning_setting", "temperature", "provider_prefs", "finish_reason", "wall_s", "prompt_chars", "judged_at",
+    "rubric", "cheatbench", "rationale",
 }
+# Judge roots under the data root and the label prefix of their scalar fields (v2 = engagement rubric).
+_JUDGE_ROOTS = (("cheatbench_judge", "judge_"), ("cheatbench_judge_v2", "judge2_"))
 
 
 def judge_records(data_root: Path) -> dict[str, list[dict[str, Any]]]:
-    """trajectory_id -> [(file, judge.jsonl record)] from data/cheatbench_judge/<judge>/<run>/judge.jsonl."""
+    """trajectory_id -> [(file, judge.jsonl record)] from data/cheatbench_judge[_v2]/<judge>/<run>/judge.jsonl."""
     out: dict[str, list[dict[str, Any]]] = {}
-    root = data_root / "cheatbench_judge"
-    if not root.exists():
-        return out
-    for p in sorted(root.glob("*/*/judge.jsonl")):
+    paths = [(p, prefix) for name, prefix in _JUDGE_ROOTS for p in sorted((data_root / name).glob("*/*/judge.jsonl"))]
+    for p, prefix in paths:
         for line in p.read_text().splitlines():
             try:
                 rec = json.loads(line)
@@ -260,16 +261,20 @@ def judge_records(data_root: Path) -> dict[str, list[dict[str, Any]]]:
             if "episode" not in rec:
                 continue
             tid = trajectory_id(p.parent.name, rec["episode"], int(rec.get("attempt_index") or 1))
-            out.setdefault(tid, []).append({"file": p.relative_to(data_root).as_posix(), "rec": rec})
+            out.setdefault(tid, []).append({"file": p.relative_to(data_root).as_posix(), "rec": rec, "prefix": prefix})
     return out
 
 
 def judge_side_labels(judged: dict[str, list[dict[str, Any]]]) -> dict[str, dict[str, Any]]:
-    """Scalar verdict fields of the first judge file per trajectory, as `judge_<field>` labels."""
+    """Scalar verdict fields as `judge_<field>` (v1) / `judge2_<field>` (v2) labels; the first file per root wins."""
     out = {}
     for tid, entries in judged.items():
-        e = entries[0]
-        out[tid] = {f"judge_{k}": {"value": v, "source": e["file"]} for k, v in e["rec"].items() if k not in _JUDGE_META and isinstance(v, (bool, int, float))}
+        labels = out.setdefault(tid, {})
+        for e in entries:
+            for k, v in e["rec"].items():
+                scalar = isinstance(v, (bool, int, float)) or (e["prefix"] == "judge2_" and isinstance(v, str))  # v2 strings are enums
+                if k not in _JUDGE_META and scalar and not k.endswith(("_quote", "_step")):
+                    labels.setdefault(f"{e['prefix']}{k}", {"value": v, "source": e["file"]})
     return out
 
 
@@ -288,7 +293,7 @@ def judge_entries(judged: dict[str, list[dict[str, Any]]]) -> dict[str, list[dic
                     "strongest_status": "enacted" if rec.get("cheated") else None,
                     "categories": [k for k, v in verdict.items() if v is True],
                     "flags": [{"step": "-", "channel": "verdict", "category": k, "status": "", "quote": v, "why": ""} for k, v in verdict.items() if isinstance(v, str) and v.strip()],
-                    "rationale": rec.get("reasoning"),
+                    "rationale": rec.get("reasoning") or rec.get("rationale"),
                     "judged_at": rec.get("judged_at"),
                 }
             )
