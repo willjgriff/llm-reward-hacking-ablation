@@ -62,7 +62,7 @@ echo "$(date -u +%FT%TZ) switching to $name (LANGUAGE_MODEL_ONLY=$LANGUAGE_MODEL
 rm -f "$STATE"
 tmux kill-session -t vllm 2>/dev/null || true
 for _ in $(seq 1 30); do curl -sf -m 2 "localhost:$PORT/v1/models" >/dev/null || break; sleep 2; done
-tmux new-session -d -s vllm "source '$VLLM_ENV/bin/activate' && cd '$REPO_DIR' && RHABLATION_RESID_BIAS=1 HF_HOME='$HF_HOME' \
+tmux new-session -d -s vllm "source '$VLLM_ENV/bin/activate' && cd '$REPO_DIR' && RHABLATION_RESID_BIAS=1 HF_HOME='$HF_HOME' LD_LIBRARY_PATH='${LD_LIBRARY_PATH:-}' \
   MODEL='$dir' PORT=$PORT MAX_MODEL_LEN=$MAX_MODEL_LEN GPU_MEMORY_UTILIZATION=$GPU_MEMORY_UTILIZATION LANGUAGE_MODEL_ONLY=$LANGUAGE_MODEL_ONLY \
   bash scripts/serve_vllm.sh --served-model-name $name --max-num-seqs $MAX_NUM_SEQS --speculative-config '$SPEC_CONFIG' \
   2>&1 | tee /tmp/vllm_$name.log"
