@@ -19,6 +19,8 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONF=/root/.config/rhablation/cheatbench_serve.env
 [ -f "$CONF" ] || { echo "ERROR: $CONF missing: run cheatbench/gpubox_setup.sh first" >&2; exit 1; }
 # shellcheck disable=SC1090
+COMPAT_FILE=/root/.config/rhablation/cuda_compat_path   # gpubox_setup.sh: driver older than CUDA 13
+if [ -s "$COMPAT_FILE" ]; then export LD_LIBRARY_PATH="$(cat "$COMPAT_FILE")${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"; fi
 . "$CONF"   # MODELS_DIR VLLM_ENV HF_HOME PORT MAX_MODEL_LEN GPU_MEMORY_UTILIZATION MAX_NUM_SEQS SPEC_CONFIG [LANGUAGE_MODEL_ONLY]
 
 MODE_FILE=/root/.config/rhablation/cheatbench_vision

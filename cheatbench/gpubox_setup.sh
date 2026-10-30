@@ -64,6 +64,23 @@ echo "free disk on $WORK: ${free_gb}G (a fresh box needs ~${MIN_FREE_GB}G)"
 # Rented hosts leave injected API tokens world-readable here.
 [ -f /etc/environment ] && chmod 600 /etc/environment
 
+step "CUDA driver"
+# vLLM 0.32.0 and the stage-5 torch are CUDA 13 builds. A host whose driver tops out below CUDA 13 (e.g. driver 570 =
+# CUDA 12.8, seen on a Vast H200 NVL 2026-10-30) runs them through NVIDIA's forward-compatibility libraries instead:
+# installed here, and put on LD_LIBRARY_PATH by this script and by serve_row.sh via COMPAT_FILE.
+COMPAT_FILE=/root/.config/rhablation/cuda_compat_path
+driver_cuda=$(nvidia-smi | sed -n 's/.*CUDA Version: \([0-9]*\)\..*/\1/p' | head -1)
+echo "driver supports CUDA $driver_cuda"
+if [ "${driver_cuda:-0}" -lt 13 ]; then
+  [ -d /usr/local/cuda-13.0/compat ] || { apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq cuda-compat-13-0; }
+  install -d -m 700 "$(dirname "$COMPAT_FILE")"
+  echo /usr/local/cuda-13.0/compat > "$COMPAT_FILE"
+  export LD_LIBRARY_PATH="/usr/local/cuda-13.0/compat${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+  echo "using CUDA 13.0 forward compatibility: $(cat "$COMPAT_FILE")"
+else
+  rm -f "$COMPAT_FILE"
+fi
+
 step "Tools"
 command -v uv >/dev/null || curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
 for tool in tmux curl; do
