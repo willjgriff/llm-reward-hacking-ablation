@@ -12,8 +12,9 @@
 #   3. Base weights Qwen/Qwen3.8-27B @ 1d4bf0f (bf16) and the G9 direction (sha256-checked).
 #   4. Calibrates alpha at decoder layers 30-63 (first-token KL 0.05, stage9_calibrate_alpha.py) for G9 (a
 #      reproduction check: stage 9 got 3.6066) and for random seed 1 (the random control's alpha).
-#   5. Builds three bias-only checkpoints (shards are symlinks to the base): cb_base (zero biases), cb_a3 (stage-9
-#      CONF_A3_G_L30, stage9/RECIPES.md), cb_rand (random unit directions, seed 1, same window, its own alpha).
+#   5. Builds the bias-only checkpoints (shards are symlinks to the base): cb_base (zero biases), cb_a3 (stage-9
+#      CONF_A3_G_L30, stage9/RECIPES.md), cb_a3half / cb_a3quarter (the same at alpha / 2 and / 4), cb_g40 (stage-9
+#      U_G_steer: G9 at layers 40-63), cb_rand (random unit directions, seed 1, layers 30-63, its own alpha).
 #   6. Writes /root/.config/rhablation/cheatbench_serve.env and starts serving cb_base (cheatbench/serve_row.sh).
 # No benchmark and no model-written code runs on this box; the episodes run on the CheatBench VM.
 set -euo pipefail
@@ -34,6 +35,7 @@ BASE_MODEL=Qwen/Qwen3.8-27B
 BASE_REV=1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0
 G_SHA=16f4e243164d0b492bb442f0fd984bf3825f3c5a4988d8a7ad2bcdedd604376a
 A3_ALPHA=3.606600747976345   # stage9/RECIPES.md, CONF_A3_G_L30
+G40_ALPHA=4.18967051249633    # stage9/RECIPES.md, U_G_steer (layers 40-63)
 LAYERS=30-63
 VLLM_VERSION="${VLLM_VERSION:-0.32.0}"   # the stage-9 box's
 WORK=/workspace
@@ -132,6 +134,10 @@ build() {  # name, then stage9_bias_checkpoint.py arguments
 }
 build cb_base --mode zero
 build cb_a3 --mode steer --direction "$G" --layers "$LAYERS" --alpha "$A3_ALPHA" --sign -1
+half_alpha=$(python3 -c "print($A3_ALPHA / 2)"); quarter_alpha=$(python3 -c "print($A3_ALPHA / 4)")
+build cb_a3half --mode steer --direction "$G" --layers "$LAYERS" --alpha "$half_alpha" --sign -1
+build cb_a3quarter --mode steer --direction "$G" --layers "$LAYERS" --alpha "$quarter_alpha" --sign -1
+build cb_g40 --mode steer --direction "$G" --layers 40-63 --alpha "$G40_ALPHA" --sign -1
 if [ "$SKIP_RAND" = 1 ]; then
   echo "cb_rand: skipped (--skip-rand)"
 else
@@ -167,6 +173,6 @@ grep -E "KV cache|Maximum concurrency" /tmp/vllm_cb_base.log | tail -3 || true
 step "Done"
 cat <<EOF
 Rows: $(ls -d "$MODELS_DIR"/cb_* | xargs -n1 basename | tr '\n' ' ')
-Switch by hand: bash cheatbench/serve_row.sh base|a3|rand|status
+Switch by hand: bash cheatbench/serve_row.sh base|a3|a3half|a3quarter|g40|rand|status
 Next: authorise the CheatBench VM with the command cheatbench/setup_cpu_vm.sh printed (FROM=..., DONE_KEY=..., ROW_KEY=...).
 EOF

@@ -12,8 +12,8 @@ rules apply on this VM only and override the project `CLAUDE.md` wherever the tw
 - The model is served by vLLM on a separate GPU box (Vast). This VM reaches it at
   `http://127.0.0.1:8000/v1` through the systemd service `rhtunnel` (autossh, port forward only). You have no
   shell on the GPU box. The only thing you can change there is which eval row vLLM serves:
-  `request-gpubox-row base|a3|rand|status` (root; served names `cb_base`, `cb_a3`, `cb_rand`; model entries
-  `cb-base`, `cb-a3`, `cb-rand`). Switch only when the mission says so and only with no episode running (it
+  `request-gpubox-row base|a3|a3half|a3quarter|g40|rand|status` (root; served names `cb_<row>`; CheatBench model
+  entries `cb-<row>`). Switch only when the mission says so and only with no episode running (it
   refuses with exit 3 while requests are in flight). Before every run, check that `/v1/models` lists the row that
   run's model entry names; if it does not, or the endpoint is down and a switch does not fix it, record it and stop.
 - The GPU box stops itself after its watchdog window with no vLLM request in flight, or earlier when you
@@ -49,6 +49,19 @@ rules apply on this VM only and override the project `CLAUDE.md` wherever the tw
   This mission should need no new code; if a small wrapper is unavoidable, put it under `cheatbench/` and paste
   it in full into `LOG.md`. No git commits or pushes, no other way of sending code anywhere.
 - Never modify CheatBench's scoring, tasks or prompts.
+
+## Exceptions for `cheatbench/mission_capability.md` only
+- **Terminal-Bench 2.0 runs through Harbor and Docker, as root** (`/opt/harbor`, `cheatbench/setup_tbench.sh`).
+  Docker access is root-equivalent, so there is no unprivileged option. The boundary is the task container:
+  model-written commands run only inside it.
+  - Use only `-e docker` and the task's own compose files.
+  - No bind mounts of host paths beyond what Harbor sets up.
+  - No `--privileged`, no `network_mode: host`.
+  - Never `docker run` model-written code yourself.
+- `cheatbench` stays out of the docker group.
+- **lm-eval runs as `cheatbench`** (`/home/cheatbench/lmeval`, `lmeval_chat.py`). It needs no key.
+- **New code:** `cheatbench/tools/lmeval_chat.py` exists. Small export/report scripts for this mission are allowed under `cheatbench/` and pasted in full into `LOG.md`; they never execute model output.
+- **A throwaway listener** on `127.0.0.1` (for example to read the request body a client sends) is allowed for at most a few minutes during the phase-0 effort check, then killed.
 
 ## Reporting and uploads (the user reads only these)
 - `box_report/LOG.md` (append-only, UTC timestamps: decisions, exact commands, timings, errors) and
