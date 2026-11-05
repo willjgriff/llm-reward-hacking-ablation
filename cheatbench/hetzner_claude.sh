@@ -74,6 +74,9 @@ deny = settings.setdefault("permissions", {}).setdefault("deny", [])
 for rule in ("mcp__*", "mcp__claude_ai_Google_Drive", "mcp__claude_ai_Claude_Docs"):
     if rule not in deny:
         deny.append(rule)
+# The bypass-permissions notice is pre-accepted (user decision 2026-11-05), so the session starts without a
+# manual confirmation; /login may still be needed once per box.
+settings["skipDangerousModePermissionPrompt"] = True
 path.write_text(json.dumps(settings, indent=2) + "\n")
 print("deny rules in", path, ":", deny)
 PY
@@ -99,7 +102,7 @@ fi
 
 step "Next"
 cat <<EOF
-  tmux attach -t claude        # accept the bypass-permissions notice (and /login if asked); the mission then starts
+  tmux attach -t claude        # /login if asked (the bypass notice is pre-accepted); the mission then starts
   detach with Ctrl-b d; the session keeps running after you disconnect
 Resume:  cd $REPO_DIR && IS_SANDBOX=1 claude --dangerously-skip-permissions --strict-mcp-config${effort_arg:-} --continue
 When finished: /logout inside claude, pull anything you want, then delete the server in the Hetzner console.
