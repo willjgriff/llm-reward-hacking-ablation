@@ -200,10 +200,10 @@ EOF
   cat > /usr/local/sbin/request-gpubox-row <<'EOF'
 #!/usr/bin/env bash
 # Make the GPU box serve one CheatBench eval row, or report what it serves. Run as root, with no episode running:
-#   request-gpubox-row base|a3|a3half|a3quarter|g40|rand|status|vision-on|vision-off
+#   request-gpubox-row base|a3|a3half|a3quarter|g40|rand|x1|r1|x0|status|vision-on|vision-off
 # Blocks until the row answers (a few minutes, at most 20). Exit 3: requests still in flight on the box.
 set -euo pipefail
-case "${1:-}" in base|a3|a3half|a3quarter|g40|rand|status|vision-on|vision-off) ;; *) echo "usage: request-gpubox-row base|a3|a3half|a3quarter|g40|rand|status|vision-on|vision-off" >&2; exit 2 ;; esac
+case "${1:-}" in base|a3|a3half|a3quarter|g40|rand|x1|r1|x0|status|vision-on|vision-off) ;; *) echo "usage: request-gpubox-row base|a3|a3half|a3quarter|g40|rand|x1|r1|x0|status|vision-on|vision-off" >&2; exit 2 ;; esac
 . /etc/rhtunnel/box.env
 exec ssh -T -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ServerAliveInterval=30 \
   -o UserKnownHostsFile=/etc/rhtunnel/known_hosts -i /root/.ssh/gpubox_row \

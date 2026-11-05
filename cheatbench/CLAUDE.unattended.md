@@ -12,7 +12,7 @@ rules apply on this VM only and override the project `CLAUDE.md` wherever the tw
 - The model is served by vLLM on a separate GPU box (Vast). This VM reaches it at
   `http://127.0.0.1:8000/v1` through the systemd service `rhtunnel` (autossh, port forward only). You have no
   shell on the GPU box. The only thing you can change there is which eval row vLLM serves:
-  `request-gpubox-row base|a3|a3half|a3quarter|g40|rand|status` (root; served names `cb_<row>`; CheatBench model
+  `request-gpubox-row base|a3|a3half|a3quarter|g40|rand|x1|r1|x0|status` (root; served names `cb_<row>`; CheatBench model
   entries `cb-<row>`). Switch only when the mission says so and only with no episode running (it
   refuses with exit 3 while requests are in flight). Before every run, check that `/v1/models` lists the row that
   run's model entry names; if it does not, or the endpoint is down and a switch does not fix it, record it and stop.
@@ -50,7 +50,7 @@ rules apply on this VM only and override the project `CLAUDE.md` wherever the tw
   it in full into `LOG.md`. No git commits or pushes, no other way of sending code anywhere.
 - Never modify CheatBench's scoring, tasks or prompts.
 
-## Exceptions for `cheatbench/mission_capability.md` only
+## Exceptions for `cheatbench/mission_capability.md` and `cheatbench/mission_persistence_tb.md` only
 - **Terminal-Bench 2.0 runs through Harbor and Docker, as root** (`/opt/harbor`, `cheatbench/setup_tbench.sh`).
   Docker access is root-equivalent, so there is no unprivileged option. The boundary is the task container:
   model-written commands run only inside it.
