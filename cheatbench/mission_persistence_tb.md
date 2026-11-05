@@ -16,24 +16,18 @@ References from the capability run (2026-10-30, same 89 tasks, Harbor and settin
 
 Why TB2 and not the existing TV rollouts: the TV judge screen (`data/stage3/audit/tv_persistence-all/persistence_report.md`, 2026-11-05) cannot separate lost persistence from the end of tampering. Persistence scores sit at the ceiling for every row, A3 included. The flags that do move (claims the verifier is broken, confident final answers, fewer re-checks) move for A3 too, and on TV they are mostly correct statements.
 
-## GPU box changes needed before launch (laptop work, after approval)
+## GPU box
 
-- **`gpubox_setup.sh`:** build merged checkpoints for x1/r1/x0.
-  - Re-run the recorded stacks: stage-7 matrix build code from the code mirror, and the direction files from HF `stage4/stage7/s7-tv`, `stage4/tv27b-full` and stage 7's random seed.
-  - Add the MTP weights (`add_mtp_weights.py`), as stage 7 did.
-  - **Verify** each against its stored gate: X1/X0 vs `stage7/rows/<id>/gate/gate.json`, R1 vs the stage-5c scores to ≤ 0.001 nats (the stage-5d check).
-  - The stored adapters are not used: for stacks they hold only the last round.
-- **Disk:** each merged checkpoint is ~55 GB, so build one row at a time. `serve_row.sh` builds the requested row if it is missing and deletes the previous merged row first. A build takes ~2 min plus verification.
-- **`serve_row.sh`:**
-  - accept `x1|r1|x0` (merged rows, served without the bias plugin);
-  - accept the same names on the forced-command row key.
+`cheatbench/mission_persistence_gpubox.md` (a Claude session on the GPU box) runs first. It rebuilds x1, r1 and x0 as merged checkpoints, verifies each against its stored gate, and extends `serve_row.sh` so `request-gpubox-row x1|r1|x0` works. A row it could not verify is not servable; `request-gpubox-row status` and the HF report `cheatbench/persistence/box_report/persistence_gpubox/SUMMARY.md` say which.
 
 ## Plan (VM agent)
 
 Phases 0–2 as in `mission_capability.md`:
+- Wait until `request-gpubox-row status` says `serving cb_x1` (the prep mission's end state; poll every 10 min, give up after 4 h and finish). If it says `cb_base`, read the prep summary on HF: run only the rows marked verified.
 - Preflight and the effort check.
 - No smoke: the settings and C = 16 are taken from the capability run unchanged, so concurrency and timeouts match the references.
 - Same Harbor commit, same task order (agent timeout descending).
+- Same export: the capability run's `cheatbench/tools/tb2_export.py` exists only as text in HF `cheatbench/capability/box_report/LOG.md` (full text in the 16:04 entry, the `context_limit` change in the 16:49 entry). Recreate it from there unchanged, so the columns match the reference CSVs, and paste it into `LOG.md`.
 
 Blocks in order: **x1 → r1**, then **x0 only if** x1 or r1 loses tasks against base (paired McNemar p < 0.2, or ≥ 8 more tasks lost than gained). x0 then tells whether the loss is specific to the direction or comes from the stack edit itself. Record the rule's inputs and the decision in `LOG.md` before starting or skipping x0. Each block:
 - 89 tasks × 1 attempt, `collect_rollout_details` on;
@@ -48,7 +42,7 @@ Per row, report the capability run's headline columns:
 
 For each edited row, 5 episodes that base passed and the row failed, in three lines each with a verbatim quote, as in the capability summary.
 
-Time: ~1.5 h per block (capability run: 82–103 min), so 3–5 h plus rebuilds. Cap 8 h. Self-stop as before: uploads verified, `systemctl stop rhtunnel`, `request-gpubox-stop`.
+Time: ~1.5 h per block (capability run: 82–103 min), so 3–5 h plus rebuilds. Cap 8 h. Uploads under `cheatbench/persistence/`. Self-stop as before: uploads verified, `systemctl stop rhtunnel`, `request-gpubox-stop`.
 
 ## After the mission (laptop)
 
