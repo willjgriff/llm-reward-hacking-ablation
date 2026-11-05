@@ -1,6 +1,6 @@
-# Mission stage 10 (DRAFT, not approved): decision-sentence directions from forked TerminalVerifier rollouts
+# Mission stage 10: decision-sentence directions from forked TerminalVerifier rollouts
 
-Status: draft, user decisions of 2026-11-05 applied (regex position checked by the box agent, separate box for the Terminal-Bench rows, mean-centred weight edit as a second arm). Nothing here has run.
+Status: approved for launch 2026-11-05 (user decisions applied: regex position checked by the box agent, separate box for the Terminal-Bench rows, mean-centred weight edit as a second arm). Nothing here has run yet.
 
 ## Why (team meeting 2026-11-04)
 

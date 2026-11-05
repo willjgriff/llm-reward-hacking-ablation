@@ -1,6 +1,6 @@
-# Mission (DRAFT, not approved): do the in-environment TV edits cost persistence? (CheatBench VM + GPU box)
+# Mission: do the in-environment TV edits cost persistence? (CheatBench VM + GPU box)
 
-Status: draft, user decisions of 2026-11-05 applied (x1 and r1 first, x0 only if one of them loses tasks, no base re-roll, runs in parallel with stage 10 on its own GPU box). Same setup as `mission_capability.md` (Terminal-Bench 2.0 via Harbor/Terminus-2 on the VM, rows served by the GPU box). Nothing here has run.
+Status: approved for launch 2026-11-05 (user decisions applied: x1 and r1 first, x0 only if one of them loses tasks, no base re-roll, runs in parallel with stage 10 on its own GPU box). Same setup as `mission_capability.md` (Terminal-Bench 2.0 via Harbor/Terminus-2 on the VM, rows served by the GPU box). Nothing here has run.
 
 ## Goal
 

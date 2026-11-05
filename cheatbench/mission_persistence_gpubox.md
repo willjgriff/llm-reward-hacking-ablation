@@ -1,6 +1,6 @@
-# Mission (DRAFT): GPU-box prep for the Terminal-Bench persistence rows (x1, r1, x0)
+# Mission: GPU-box prep for the Terminal-Bench persistence rows (x1, r1, x0)
 
-Status: draft, 2026-11-05. A Claude session on the GPU box that will serve `cheatbench/mission_persistence_tb.md`. It runs **before** the VM's mission, on a box that `cheatbench/gpubox_setup.sh --skip-rand` has already set up (envs, base weights, residual-bias plugin, `cb_base` serving, `/root/.config/rhablation/cheatbench_serve.env`). Rules: `sweep/CLAUDE.unattended.md` (installed by `box_claude.sh`).
+Status: approved for launch, 2026-11-05. A Claude session on the GPU box that will serve `cheatbench/mission_persistence_tb.md`. It runs **before** the VM's mission, on a box that `cheatbench/gpubox_setup.sh --skip-rand` has already set up (envs, base weights, residual-bias plugin, `cb_base` serving, `/root/.config/rhablation/cheatbench_serve.env`). Rules: `sweep/CLAUDE.unattended.md` (installed by `box_claude.sh`).
 
 ## Goal
 
