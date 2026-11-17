@@ -11,7 +11,7 @@
 # with RESTART_WATCHDOG=1. DONE_KEY (optional) is a second VM key whose only possible effect is a forced
 # command that creates the watchdog's stop-request file: the VM's request-gpubox-stop then stops the box
 # as soon as nothing on it is busy, instead of after the idle window. ROW_KEY (optional) is a third VM key whose
-# only possible effect is cheatbench/serve_row.sh with one of the fixed words it accepts (rows base a3 a3half a3quarter g40 rand, status, vision-on, vision-off) (the VM's request-gpubox-row):
+# only possible effect is cheatbench/serve_row.sh (or ROW_SCRIPT, e.g. serve_row_kto.sh) with one of the fixed words it accepts (rows base a3 a3half a3quarter g40 rand, status, vision-on, vision-off) (the VM's request-gpubox-row):
 # it switches which eval row vLLM serves (cheatbench/mission_a3.md).
 # Vast may rewrite /root/.ssh/authorized_keys on restart: re-run after one.
 set -euo pipefail
@@ -22,6 +22,7 @@ WATCHDOG_MINUTES="${WATCHDOG_MINUTES:-90}"
 RESTART_WATCHDOG="${RESTART_WATCHDOG:-0}"
 DONE_KEY="${DONE_KEY:-}"
 ROW_KEY="${ROW_KEY:-}"
+ROW_SCRIPT="${ROW_SCRIPT:-serve_row.sh}"   # the row key's forced command; serve_row_kto.sh for cheatbench/mission_capability_kto.md
 KEY="${1:-}"
 AUTH=/root/.ssh/authorized_keys
 PEERS="${RHABLATION_TUNNEL_PEERS:-/root/.config/rhablation/tunnel_peers}"
@@ -35,7 +36,7 @@ die() { echo "ERROR: $*" >&2; exit 1; }
 [[ "$FROM" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] || die "set FROM=<the VM's public IPv4> (setup_cpu_vm.sh prints the full command)"
 [ -z "$DONE_KEY" ] || [[ "$DONE_KEY" =~ ^ssh-ed25519\ [A-Za-z0-9+/=]+(\ .*)?$ ]] || die "DONE_KEY must be one ssh-ed25519 public key"
 [ -z "$ROW_KEY" ] || [[ "$ROW_KEY" =~ ^ssh-ed25519\ [A-Za-z0-9+/=]+(\ .*)?$ ]] || die "ROW_KEY must be one ssh-ed25519 public key"
-[ -z "$ROW_KEY" ] || [ -f "$REPO_DIR/cheatbench/serve_row.sh" ] || die "missing $REPO_DIR/cheatbench/serve_row.sh"
+[ -z "$ROW_KEY" ] || [ -f "$REPO_DIR/cheatbench/$ROW_SCRIPT" ] || die "missing $REPO_DIR/cheatbench/$ROW_SCRIPT"
 case "$WATCHDOG_MINUTES" in ''|*[!0-9]*) die "WATCHDOG_MINUTES must be a whole number" ;; esac
 
 install -d -m 700 /root/.ssh
@@ -59,9 +60,9 @@ if [ -n "$DONE_KEY" ]; then
   authorise "restrict,from=\"$FROM\",command=\"touch $STOP_REQUEST_FILE && echo stop requested\"" "$DONE_KEY"
 fi
 if [ -n "$ROW_KEY" ]; then
-  [ -f /root/.config/rhablation/cheatbench_serve.env ] || echo "WARNING: run cheatbench/gpubox_setup.sh before the VM switches rows"
-  echo "row key, forced command only (serve_row.sh, row from the client's command, checked there), from $FROM:"
-  authorise "restrict,from=\"$FROM\",command=\"bash $REPO_DIR/cheatbench/serve_row.sh --forced\"" "$ROW_KEY"
+  [ "$ROW_SCRIPT" != serve_row.sh ] || [ -f /root/.config/rhablation/cheatbench_serve.env ] || echo "WARNING: run cheatbench/gpubox_setup.sh before the VM switches rows"
+  echo "row key, forced command only ($ROW_SCRIPT, row from the client's command, checked there), from $FROM:"
+  authorise "restrict,from=\"$FROM\",command=\"bash $REPO_DIR/cheatbench/$ROW_SCRIPT --forced\"" "$ROW_KEY"
 fi
 
 install -d -m 700 "$(dirname "$PEERS")"
