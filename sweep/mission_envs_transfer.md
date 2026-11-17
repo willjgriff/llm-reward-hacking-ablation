@@ -1,5 +1,11 @@
 # Transfer test: Ethan's saved rows on the kept environments (env GPU box)
 
+**Update 2 (user, 2026-11-18 ~16:05 UTC): trimmed. This replaces Update 1's order from the end of block A row `kto` onwards.** The project's final output is now direction vs KTO LoRA on sample efficiency and toy-data tolerance; this run's job is to show whether any saved row (direction or LoRA) transfers to any of these environments. **Drop rows b1 and rand everywhere.** After `kto` finishes block A:
+1. Blocks B and C (upward_deception, sales, hvta, data_entry, nishimura; sizes as before) for rows **mbppkto, kto, graderlora, mbpplora**, in that row order, one row at a time over all five envs. hvta needs its **base** first (base is missing there), so run base on hvta before the four rows.
+2. Then block A for **graderlora, mbpplora**.
+3. Then end (final SUMMARY, uploads verified, stop vLLM and evals, `rm /tmp/rhablation-no-stop`). Expected end ~05:00 UTC 2026-11-19.
+Log the change; the SUMMARY tables keep the b1/rand columns as "not run (dropped, Update 2)".
+
 **Update 1 (user, 2026-11-18 ~09:40 UTC): order by importance, not speed. This replaces the phases and "Order" below.** Importance = how much a hack type adds to the diversity of kinds of hacking beyond what the rows were trained on (grader cue-following, MBPP test-fitting) and TerminalVerifier tampering. Let the phase-1 `base` run that is already going finish (base is needed for those envs anyway), then work through these blocks in order, each block over all rows (base, mbppkto, kto, graderlora, mbpplora, then b1, rand) before the next block starts:
 
 | block | envs (run together per row) | kind of hacking it adds |
