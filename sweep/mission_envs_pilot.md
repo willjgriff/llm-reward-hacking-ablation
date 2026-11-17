@@ -1,5 +1,7 @@
 # Base-rate pilots of three new hack families (rh-envs), unattended on the env GPU box
 
+**Update 2026-11-17 ~20:20 UTC (user): stop `hanoi_rule` at 100 completed episodes, finish steps 4-6 here (not step 7: keep vLLM and the box up), then carry out `sweep/mission_envs_round2.md`, which is the mission from then on.**
+
 Status: approved by the user 2026-11-17 (plan `~/.claude/plans/immutable-sniffing-ripple.md`, step 6); the laptop is off from here, so this box finishes the pilots alone. Rules: `sweep/CLAUDE.unattended.md` (all model-written code through `rhbench-run`, no credential reachable by `rhbench`, reports in `box_report/envs_pilot/LOG.md` + `SUMMARY.md`). Meeting with the mentor on 2026-11-18 evening: the base rates must be on HF before then.
 
 ## Why
