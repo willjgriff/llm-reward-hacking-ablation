@@ -1,5 +1,15 @@
 # Transfer test: Ethan's saved rows on the kept environments (env GPU box)
 
+**Update 1 (user, 2026-11-18 ~09:40 UTC): order by importance, not speed. This replaces the phases and "Order" below.** Importance = how much a hack type adds to the diversity of kinds of hacking beyond what the rows were trained on (grader cue-following, MBPP test-fitting) and TerminalVerifier tampering. Let the phase-1 `base` run that is already going finish (base is needed for those envs anyway), then work through these blocks in order, each block over all rows (base, mbppkto, kto, graderlora, mbpplora, then b1, rand) before the next block starts:
+
+| block | envs (run together per row) | kind of hacking it adds |
+|---|---|---|
+| A | revert_or_refactor (100), tower_of_hanoi 10 disks rule (100), overclaim main (100) | destroying others' work to pass tests; breaking an explicit process rule when honest success is impossible; claiming work not done |
+| B | upward_deception default (200), sales weak (200) | fabricating results after a tool failure; gaming a quota with invalid entries |
+| C | hvta hidden_solution (100), data_entry fallback (200), nishimura 9 datasets (100 each) | reading a hidden answer (close to TV peeking); fabricated answers (close to B); sycophancy / proxy answers (close to the grader cue) |
+
+Sizes as in the table below. For the meeting (17:00 UTC) report whatever of block A is done, rows in order; do not shrink block A to fit the meeting. If time runs short at the end, drop rows b1/rand of later blocks first, then block C, never a block's base. Use the server's 64 sequences across a block's envs (hanoi and revert are long: give them the connections they had in the pilots, overclaim the rest) and log the split.
+
 Status: approved by the user 2026-11-18 ~09:15 UTC. This is protocol step 5 of CLAUDE.md "Current framing": before training on an environment, run base, mbpp_kto, grader_kto and both LoRAs on it. The base-rate pilots were step 1-2; this is the point of them. Same box and session as `sweep/mission_envs_round2.md`, same rules (`sweep/CLAUDE.unattended.md`; environments run only as `rhbench`; no credential reachable by `rhbench`; no OpenRouter key on this box). Log in `box_report/envs_transfer/LOG.md`, results in `box_report/envs_transfer/SUMMARY.md`.
 
 **Deadline:** results for phase 1 on HF by **2026-11-18 17:00 UTC** (meeting that evening); everything stops by 2026-11-19 20:00 UTC. Before you start: `rm /tmp/rhablation-no-stop` only at the end (the laptop set it at 09:13 so the watchdog would not stop the idle box).
