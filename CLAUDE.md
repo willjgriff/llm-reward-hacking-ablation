@@ -8,6 +8,28 @@ Does orthogonalization (abliteration, as in heretic/obliteratus) remove reward h
 General capability degradation must always be measured, and orthogonalization should be done in a way that minimises it.
 
 ## Key framing (do not deviate without asking)
+**Current framing (user, 2026-11-16; overrides everything below where they conflict, including the 2026-09-21 guidance, "follow heretic" and the DPO baseline):**
+- **Question:** can reward hacking in `Qwen/Qwen3.8-27B` at low reasoning effort be removed by projecting out a single direction? The test is transfer: the direction should cut hacking on environments it was not trained on, without making the model lazier or less capable, and do better than a LoRA trained on the same data. A clean negative result ("reward hacking is not one direction") is acceptable.
+- **Difference-in-means is dropped** (Vlad). Do not try to salvage it. Per-environment DoM directions do not transfer (D_TV works only on TV). The Grader direction G9/A3 cuts CheatBench cheating from 88% to about 1%, but Terminal-Bench falls from 51.7% to 14.6% and episodes get shorter, so its transfer is confounded with damage.
+- **Method: Ethan's KTO-trained projection direction** (`ekhadley/ortho` `train_vector.py`). It is one shared vector trained with the KTO loss, with the projection inside the training loop: layers 30–63, generated tokens only, beta 0.1, KL weight 0.1 on neutral rollouts, lr 1e-3. `kto_cfgs.py` names `g0 = SweepCfg()` as grader_kto's recipe; confirm the current recipe with Ethan. **Baseline: plain KTO LoRA** (`train_lora.py`, rank 16), not DPO.
+- **Results so far:**
+  - mbpp_kto: MBPP cheating 27.3% → 11.3%, held-out Grader 30.9% → 7.0%, honest MBPP solving unchanged, no Terminal-Bench loss.
+  - LoRA baseline: MBPP 13.5%, held-out Grader 16.2%.
+  - Neither moves TerminalVerifier; the direction does not transfer to CheatBench.
+- **Roles:**
+  - **Ethan (method):** a stronger KTO projection, training on more diverse environments (about 50/50 that this generalises; if it does not, that is evidence against a single direction), and later a KTO refusal control.
+  - **Will (evals and environments):** follows the per-environment protocol below. Optional for Will: run the completion-based method (refused vs complied, on-policy) on refusal.
+  - **Not run by anyone now:** the sample-efficiency and bad-data comparison.
+- **Per-environment protocol (Will):**
+  1. ~200 samples at low effort.
+  2. Keep environments with a 10–80% hack rate.
+  3. One fixed prompt wording plus a control arm (no cue, feasible task, or no KPI).
+  4. Hand-check ~50 rollouts whose label is judge-only.
+  5. Before training on an environment, run base, mbpp_kto, grader_kto and both LoRAs on it (transfer test). Report base / direction / LoRA side by side with capability (Terminal-Bench 2, GSM8K, IFEval, MMLU).
+  6. Later: a per-environment KTO direction and LoRA with Ethan's recipe, cosines across environments, and CheatBench transfer per category.
+- **Env survey:** `ekhadley/ortho` `notes/rh_env_survey.md`.
+- **Status 2026-11-16:** Ethan has already ported and run the proposed Tier A (`hint_mc`, `sorh`, `feasigen`, `toolfail`, `odcv`) in `ekhadley/rh-envs` `535838e` and `ekhadley/ortho` `96d7d27`, so the env split must be re-agreed with Ethan.
+- **Infrastructure:** the judge is unchanged (deepseek-v4-flash-0731). Docker environments (ODCV, CheatBench) run on Hetzner CPU VMs against a GPU-served model, because the Vast H100 has no Docker.
 **Mentor guidance 2026-09-21 (derisking phase; overrides the bullets below where they conflict):** get OK hacking data as fast and cheaply as possible and care less, for now, about what makes the experiments more informative (possible tasks, on-policy data, very small models). Model: `Qwen/Qwen3.8-27B` at its lowest reasoning effort (most capable model under 32B, so the highest expected hacking propensity; low effort keeps token counts near an 8B's). Impossible tasks, and tasks that cue hacking, are acceptable for now; because a model may represent hacking on obviously broken tasks differently, check generalization (impossible→impossible, possible→possible, across variants and environments). Prefer possible tasks only where that is easy. Do not RL models into hacking more. Implementation and infrastructure are delegated to Claude Code with light checking; look closer only when results or data look off.
 - We remove reward hacking from **production models after all training** (e.g. Qwen/Qwen3.5-4B). We do NOT train a model to reward hack first.
 - Orthogonalization and DPO remove **propensities, not capabilities**. Do not build experiments testing whether reward hacking can be fine-tuned back in.

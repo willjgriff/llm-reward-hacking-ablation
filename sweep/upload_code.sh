@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Save the box's code tree to the private Hugging Face dataset repo, under sweep/code/. Run as root on the box:
-#   bash sweep/upload_code.sh [--repo <user/name>] [--message "evilgenie runner passes smoke"]
+#   bash sweep/upload_code.sh [--repo <user/name>] [--message "evilgenie runner passes smoke"] [--dest <name>/code]
+# --dest (default sweep/code) gives a box its own mirror, so two boxes never overwrite each other (e.g. capability_kto/code).
 # This is the only way code leaves the box. It never touches GitHub. sweep/code/ mirrors the tree (files
 # deleted on the box are deleted there); every upload is a commit, so earlier versions stay in the history.
 # Needs HF_TOKEN and HF_UPLOAD_REPO like scripts/upload_run.sh (~/.config/rhablation/upload.env).
@@ -12,10 +13,12 @@ die() { echo "ERROR: $*" >&2; exit 1; }
 
 REPO=""
 MESSAGE=""
+DEST="sweep/code"
 while [ $# -gt 0 ]; do
   case "$1" in
     --repo) REPO="${2:-}"; shift 2 ;;
     --message) MESSAGE="${2:-}"; shift 2 ;;
+    --dest) DEST="${2:-}"; shift 2 ;;
     -h|--help) sed -n '2,8p' "$0"; exit 0 ;;
     *) die "unknown argument: $1" ;;
   esac
@@ -23,7 +26,8 @@ done
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # Deletions are limited to this folder of the dataset repo; it must never be empty or the repo root.
-DEST="sweep/code"
+case "$DEST" in [A-Za-z0-9_-]*/code) ;; *) die "--dest must be <name>/code, not $DEST" ;; esac
+case "$DEST" in *..*|*//*) die "--dest must be a plain path" ;; esac
 
 UPLOAD_ENV="${RHABLATION_UPLOAD_ENV:-$HOME/.config/rhablation/upload.env}"
 if [ -f "$UPLOAD_ENV" ]; then
