@@ -67,9 +67,11 @@ LD_LIBRARY_PATH_EXTRA=$extra
 EOF
 
 step "Hooks and adapters (HF eekay/ortho)"
-hf download eekay/ortho --repo-type dataset --local-dir "$KTO/ortho" \
-  --include "acts/kto_sweep/hooks/kto.safetensors" "acts/kto_sweep/hooks/b1.safetensors" "data/vectors/Qwen3.8-27B/grader_kto.safetensors" \
-  "data/loras/Qwen3.8-27B/grader_kto_lora/step_0522/*" "data/loras/Qwen3.8-27B/mbpp_kto_lora/step_0483/*" >/dev/null
+# one pattern per call: with several --include values the CLI dropped the first one (kto.safetensors) on 2026-11-17
+for pat in "acts/kto_sweep/hooks/kto.safetensors" "acts/kto_sweep/hooks/b1.safetensors" "data/vectors/Qwen3.8-27B/grader_kto.safetensors" \
+  "data/loras/Qwen3.8-27B/grader_kto_lora/step_0522/*" "data/loras/Qwen3.8-27B/mbpp_kto_lora/step_0483/*"; do
+  hf download eekay/ortho --repo-type dataset --local-dir "$KTO/ortho" --include "$pat" >/dev/null
+done
 cp "$KTO/ortho/acts/kto_sweep/hooks/kto.safetensors" "$KTO/ortho/acts/kto_sweep/hooks/b1.safetensors" "$KTO/hooks/"
 for pair in $HOOKS_SHA256; do
   n=${pair%%=*}; f=$([ "$n" = grader_kto ] && echo "$KTO/ortho/data/vectors/Qwen3.8-27B/grader_kto.safetensors" || echo "$KTO/hooks/$n.safetensors")
