@@ -11,10 +11,10 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 KTO=/root/kto
 VLLM_ENV=$KTO/serve
-HF_HOME=/root/hf
+HF_HOME=${KTO_HF_HOME:-/root/hf}   # KTO_HF_HOME: reuse a cache that already holds the weights (the env box: /workspace/.hf_home)
 ORTHO_COMMIT=96d7d27
 PROJ_SHA256=59abf11d7e2bf3436580d457d0d449f37f99f91cf385287fe3efa4d79be060ab
-HOOKS_SHA256="kto=ba8df20d2e0fc964079c574a995992883e637c434e823b97d2afe5fa0bc30cee b1=511efd7b6d5ec6b2f79cf3d1302a8f8536367f7ea2a9e0db19e77f4b7e1d8524 grader_kto=966f21b718297c8a725a6df4570dce01e312d5edf9fdae0b20cfc9e8b7d4d166"
+HOOKS_SHA256="kto=ba8df20d2e0fc964079c574a995992883e637c434e823b97d2afe5fa0bc30cee b1=511efd7b6d5ec6b2f79cf3d1302a8f8536367f7ea2a9e0db19e77f4b7e1d8524 mbppkto=f2f9d51b1766bee7f36a81d03e2b2ec8f2e6ff63cff3f42a2cecbcf448a2f158 grader_kto=966f21b718297c8a725a6df4570dce01e312d5edf9fdae0b20cfc9e8b7d4d166"
 
 step() { printf '\n== %s\n' "$*"; }
 die() { echo "ERROR: $*" >&2; exit 1; }
@@ -68,11 +68,11 @@ EOF
 
 step "Hooks and adapters (HF eekay/ortho)"
 # one pattern per call: with several --include values the CLI dropped the first one (kto.safetensors) on 2026-11-17
-for pat in "acts/kto_sweep/hooks/kto.safetensors" "acts/kto_sweep/hooks/b1.safetensors" "data/vectors/Qwen3.8-27B/grader_kto.safetensors" \
+for pat in "acts/kto_sweep/hooks/kto.safetensors" "acts/kto_sweep/hooks/b1.safetensors" "acts/kto_sweep/hooks/mbppkto.safetensors" "data/vectors/Qwen3.8-27B/grader_kto.safetensors" \
   "data/loras/Qwen3.8-27B/grader_kto_lora/step_0522/*" "data/loras/Qwen3.8-27B/mbpp_kto_lora/step_0483/*"; do
   hf download eekay/ortho --repo-type dataset --local-dir "$KTO/ortho" --include "$pat" >/dev/null
 done
-cp "$KTO/ortho/acts/kto_sweep/hooks/kto.safetensors" "$KTO/ortho/acts/kto_sweep/hooks/b1.safetensors" "$KTO/hooks/"
+cp "$KTO/ortho/acts/kto_sweep/hooks/"{kto,b1,mbppkto}.safetensors "$KTO/hooks/"
 for pair in $HOOKS_SHA256; do
   n=${pair%%=*}; f=$([ "$n" = grader_kto ] && echo "$KTO/ortho/data/vectors/Qwen3.8-27B/grader_kto.safetensors" || echo "$KTO/hooks/$n.safetensors")
   echo "${pair#*=}  $f" | sha256sum -c -
