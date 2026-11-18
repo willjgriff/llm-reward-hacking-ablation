@@ -70,6 +70,10 @@ rules apply on this VM only and override the project `CLAUDE.md` wherever the tw
 - After every finished run, as root:
   - `bash scripts/upload_run.sh --run-dir /home/cheatbench/cheatbench/outputs/<run> --dest-prefix cheatbench`
   - `bash scripts/upload_run.sh --run-dir box_report --dest-prefix cheatbench`
+  - Sensitive data (whatever the mission marks as sensitive) goes to the private repo instead:
+    `bash scripts/upload_run.sh --private --run-dir <dir> --dest-prefix <prefix>`. Never upload it without
+    `--private`, and never into a run directory that is also uploaded publicly. Reading from the private repo
+    needs the token: do it as root, never through `rhbench-run`.
   `upload_run.sh` refuses run directories with symlinks or `.py/.sh/.ipynb` files; if it refuses, record which
   files and leave that run on disk; do not work around the check. If `~/.config/rhablation/upload.env` is
   missing, skip uploads and say so at the top of `SUMMARY.md`.
