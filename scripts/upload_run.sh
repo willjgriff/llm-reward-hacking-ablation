@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# Upload one finished run directory to a private Hugging Face dataset repo, under stage1/<run_id>/.
-#   bash scripts/upload_run.sh --run-dir data/stage1/<run_id> [--repo <user/name>] [--dest-prefix stage1]
+# Upload one finished run directory to the Hugging Face dataset repo, under stage1/<run_id>/.
+#   bash scripts/upload_run.sh --run-dir data/stage1/<run_id> [--repo <user/name> | --private] [--dest-prefix stage1]
 # --dest-prefix changes the folder in the repo: <prefix>/<run_id>/ (e.g. sweep/<model>/<benchmark>).
-# Needs HF_TOKEN and HF_UPLOAD_REPO, from the environment or from ~/.config/rhablation/upload.env
-# (override the path with RHABLATION_UPLOAD_ENV). On the GPU box run it as root, never through
+# Default target is HF_UPLOAD_REPO (public). --private targets HF_PRIVATE_REPO instead and refuses to
+# upload unless the Hub reports that repo as private. Both, and HF_TOKEN, come from the environment or
+# from ~/.config/rhablation/upload.env (override the path with RHABLATION_UPLOAD_ENV). On the GPU box run it as root, never through
 # rhbench-run: the token must stay out of reach of the user that runs model-written code.
 set -euo pipefail
 
@@ -12,16 +13,19 @@ die() { echo "ERROR: $*" >&2; exit 1; }
 RUN_DIR=""
 REPO=""
 DEST_PREFIX="stage1"
+PRIVATE=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --run-dir) RUN_DIR="${2:-}"; shift 2 ;;
     --repo) REPO="${2:-}"; shift 2 ;;
     --dest-prefix) DEST_PREFIX="${2:-}"; shift 2 ;;
-    -h|--help) sed -n '2,7p' "$0"; exit 0 ;;
+    --private) PRIVATE=1; shift ;;
+    -h|--help) sed -n '2,8p' "$0"; exit 0 ;;
     *) die "unknown argument: $1" ;;
   esac
 done
 [ -n "$RUN_DIR" ] || die "--run-dir is required"
+[ "$PRIVATE" = 0 ] || [ -z "$REPO" ] || die "--private and --repo are exclusive"
 DEST_PREFIX="${DEST_PREFIX%/}"
 case "/$DEST_PREFIX/" in *//*|*/../*|*/./*) die "--dest-prefix must be a relative path like stage1 or sweep/<model>/<benchmark>" ;; esac
 [ -d "$RUN_DIR" ] || die "no such run directory: $RUN_DIR"
@@ -40,20 +44,32 @@ if [ -f "$UPLOAD_ENV" ]; then
   . "$UPLOAD_ENV"
   set +a
 fi
-REPO="${REPO:-${HF_UPLOAD_REPO:-}}"
+if [ "$PRIVATE" = 1 ]; then
+  REPO="${HF_PRIVATE_REPO:-}"
+  [ -n "$REPO" ] || die "--private needs HF_PRIVATE_REPO (environment or $UPLOAD_ENV)"
+else
+  REPO="${REPO:-${HF_UPLOAD_REPO:-}}"
+fi
 [ -n "${HF_TOKEN:-}" ] || die "HF_TOKEN not set (environment or $UPLOAD_ENV); see setup.md 'Off-box storage'"
 [ -n "$REPO" ] || die "no target repo: pass --repo or set HF_UPLOAD_REPO (environment or $UPLOAD_ENV)"
 export HF_TOKEN
+if [ "$PRIVATE" = 1 ]; then
+  # Sensitive data: never upload it to a repo that is (or was made) public.
+  visibility=$(uv tool run --from huggingface_hub python -c \
+    'import sys; from huggingface_hub import HfApi; print(HfApi().repo_info(sys.argv[1], repo_type="dataset").private)' \
+    "$REPO") || die "could not check the visibility of $REPO"
+  [ "$visibility" = True ] || die "$REPO is not private on the Hub, refusing a --private upload"
+fi
 
 RUN_ID="$(basename "$(cd "$RUN_DIR" && pwd)")"
 DEST="$DEST_PREFIX/$RUN_ID"
 echo "uploading $RUN_DIR ($(du -sh "$RUN_DIR" | cut -f1)) -> $REPO (dataset) : $DEST"
 
 for attempt in 1 2 3; do
-  if uvx --from huggingface_hub hf upload "$REPO" "$RUN_DIR" "$DEST" --repo-type dataset \
+  if uv tool run --from huggingface_hub hf upload "$REPO" "$RUN_DIR" "$DEST" --repo-type dataset \
        --commit-message "$DEST_PREFIX run $RUN_ID"; then
     echo "uploaded. Download with:"
-    echo "  uvx --from huggingface_hub hf download $REPO --repo-type dataset --include \"$DEST/*\" --local-dir data/"
+    echo "  uv tool run --from huggingface_hub hf download $REPO --repo-type dataset --include \"$DEST/*\" --local-dir data/"
     exit 0
   fi
   echo "upload attempt $attempt failed" >&2

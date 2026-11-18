@@ -202,6 +202,18 @@ bash scripts/upload_run.sh --run-dir /home/rhbench/llm-reward-hacking-ablation/d
 It refuses to upload a run directory that contains symlinks. `--dest-prefix <path>` uploads to
 `<path>/<run_id>/` instead of `stage1/<run_id>/` (the unattended sweep uses `sweep/<model>/<benchmark>`).
 
+**Private repo for sensitive data.** `HF_UPLOAD_REPO` (`willjgriff/reward-hacking-ablation`) is public
+since 2026-10-01. Sensitive data goes to a second, private dataset repo: add
+`HF_PRIVATE_REPO=willjgriff/reward-hacking-ablation-private` to `upload.env` and give the same
+fine-grained token read + write on it (no account-wide rights). `upload_run.sh --private` uploads there
+and refuses unless the Hub reports the repo as private. Reading from it needs the token, so on a box
+download it as root, never through `rhbench-run`:
+
+```bash
+set -a; . /root/.config/rhablation/upload.env; set +a
+uv tool run --from huggingface_hub hf download "$HF_PRIVATE_REPO" --repo-type dataset --include "<path>/*" --local-dir <dir>
+```
+
 ## Unattended Claude Code on the box
 
 For long investigations (many models × benchmarks) Claude Code runs on the box itself, as root, in

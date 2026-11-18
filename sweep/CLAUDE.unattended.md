@@ -57,6 +57,10 @@ box only and override the project `CLAUDE.md` wherever the two conflict.
 - After each finished pair, as root:
   - `bash scripts/upload_run.sh --run-dir <run_dir> --dest-prefix sweep/<model>/<benchmark>`
   - `bash scripts/upload_run.sh --run-dir /workspace/llm-reward-hacking-ablation/box_report --dest-prefix sweep`
+  - Sensitive data (whatever the mission marks as sensitive) goes to the private repo instead:
+    `bash scripts/upload_run.sh --private --run-dir <dir> --dest-prefix <prefix>`. Never upload it without
+    `--private`, and never into a run directory that is also uploaded publicly. Reading from the private repo
+    needs the token: do it as root, never through `rhbench-run`.
   If `~/.config/rhablation/upload.env` is missing, skip uploads, say so at the top of `SUMMARY.md`, and keep all data on disk.
 - Disk: check `df -h /` before every chunk. Below 40 GB free, first delete weights of models you have finished with (delete the bf16 weights before downloading FP8 if both do not fit) and uv/pip caches; then delete local chunk directories **only when their upload is verified** (list the files in the HF repo and compare names and sizes), oldest first. Never delete data that is not verified on HF; if uploads are unavailable and disk runs low, stop collecting and say so. Keep `UV_CACHE_DIR` on the same filesystem as the environments so uv hard-links packages instead of copying them.
 - If an upload fails with a storage or quota error, stop uploading transcripts, keep collecting while disk allows, and put the problem at the top of `SUMMARY.md`.
