@@ -48,7 +48,7 @@ box only and override the project `CLAUDE.md` wherever the two conflict.
 ## Waiting costs nothing; polling does
 - Launch long runs as background tasks (or in their own tmux session) so you are re-invoked when they exit. Do not sit in a polling loop.
 - When you do check on a run, use one `stage1_progress.py` call, and not more often than every 20–30 minutes.
-- A watchdog stops (does not destroy) this box after 90 minutes in a row with no SSH connection, no benchmark/upload/download process, no vLLM request and no activity from you (your session transcript not written to for 15 minutes). While you work or a run is going it never triggers. Pass `--no-stop` whenever you call `scripts/stage1_pipeline.sh`; the watchdog owns stopping.
+- A watchdog stops (does not destroy) this box after 90 minutes in a row with no SSH connection in use (a terminal with no input for 30 minutes, such as a forgotten `tmux attach`, does not count), no benchmark/upload/download process, no vLLM request and no activity from you (your session transcript not written to for 15 minutes). While you work or a run is going it never triggers. Never create `/tmp/rhablation-no-stop` (it pauses the watchdog); if you find it, log it. Pass `--no-stop` whenever you call `scripts/stage1_pipeline.sh`; the watchdog owns stopping.
 
 ## Reporting (the user reads only these)
 - `box_report/LOG.md`: append-only, UTC timestamps. Decisions and reasons, commands for each full run, timings, errors, exclusions, contradictions.
@@ -62,4 +62,4 @@ box only and override the project `CLAUDE.md` wherever the two conflict.
 - If an upload fails with a storage or quota error, stop uploading transcripts, keep collecting while disk allows, and put the problem at the top of `SUMMARY.md`.
 
 ## Finishing
-When every pair is done, excluded or failed: bring `SUMMARY.md` up to date, add a short "What I would do next" section, upload the report and the code (`sweep/upload_code.sh`), and stop. The watchdog stops the box once it is idle.
+When every pair is done, excluded or failed: bring `SUMMARY.md` up to date, add a short "What I would do next" section, upload the report and the code (`sweep/upload_code.sh`), and stop. **Then, as your last action** (user rule 2026-11-19, after an idle H200 ran 7 h past its mission because an attached terminal and a no-stop file held the watchdog off): verify every upload, stop vLLM and every eval, delete `/tmp/rhablation-no-stop` if it exists, and run `tmux new -d -s stopnow "bash scripts/stop_box_when_idle.sh --now"`. It stops the box as soon as no eval, upload or vLLM request is running, whoever is connected. Write that you did so as the last LOG.md line.
