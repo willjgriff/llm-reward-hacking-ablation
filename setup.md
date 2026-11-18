@@ -214,6 +214,32 @@ set -a; . /root/.config/rhablation/upload.env; set +a
 uv tool run --from huggingface_hub hf download "$HF_PRIVATE_REPO" --repo-type dataset --include "<path>/*" --local-dir <dir>
 ```
 
+## Git access from boxes
+
+Boxes and the Hetzner VM can reach GitHub through a fine-grained token (user decision 2026-11-18).
+
+1. On github.com → Settings → Developer settings → Fine-grained tokens: choose *Only select
+   repositories*, pick the repos the boxes need, and grant *Contents*: read (or read and write to push).
+   Set an expiry. Protect `main` on any repo the boxes can push to.
+2. On the laptop:
+
+   ```bash
+   printf 'GH_TOKEN=github_pat_...\n' > ~/.config/rhablation/github.env   # optional: GIT_USER_NAME=, GIT_USER_EMAIL=
+   chmod 600 ~/.config/rhablation/github.env
+   ```
+3. On each box or VM, next to `upload.env`:
+
+   ```bash
+   scp ~/.config/rhablation/github.env gpubox:/root/.config/rhablation/github.env
+   ssh gpubox 'chmod 600 /root/.config/rhablation/github.env'
+   ```
+
+`sweep/box_claude.sh` and `cheatbench/hetzner_claude.sh` then run `scripts/setup_git_access.sh`, which
+points root's git credential helper at that file (the token is read when git needs it and never written
+into a git config or remote URL). Run it by hand on a box that is already up. `rhbench` cannot read `/root`,
+`sweep/upload_code.sh` refuses to mirror files containing the token, and the box rules allow pushes only to
+`box/<mission>` branches.
+
 ## Unattended Claude Code on the box
 
 For long investigations (many models × benchmarks) Claude Code runs on the box itself, as root, in

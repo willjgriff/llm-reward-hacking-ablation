@@ -43,6 +43,12 @@ case "$EFFORT" in ''|low|medium|high|xhigh|max) ;; *) die "--effort must be one 
 id "$RUN_USER" >/dev/null 2>&1 || die "no $RUN_USER user: run cheatbench/setup_cpu_vm.sh first"
 UPLOAD_ENV="${RHABLATION_UPLOAD_ENV:-$HOME/.config/rhablation/upload.env}"
 [ -f "$UPLOAD_ENV" ] || echo "WARNING: $UPLOAD_ENV is missing: nothing will be uploaded until you copy it over."
+GITHUB_ENV_FILE="${RHABLATION_GITHUB_ENV:-$HOME/.config/rhablation/github.env}"
+if [ -f "$GITHUB_ENV_FILE" ]; then
+  bash "$REPO_DIR/scripts/setup_git_access.sh"
+else
+  echo "NOTE: no $GITHUB_ENV_FILE: no GitHub access from here (setup.md 'Git access from boxes')."
+fi
 
 step "Claude Code"
 export PATH="$HOME/.local/bin:$PATH"

@@ -54,11 +54,13 @@ rsync -rt --no-links --max-size=2m \
 # Secret guard. Report file names only, never the matching text.
 env_value() { grep -E "^(export )?$1=" /etc/environment 2>/dev/null | tail -1 | sed -E "s/^(export )?$1=//; s/^[\"']//; s/[\"']\$//"; }
 bad=""
-for value in "$HF_TOKEN" "$(env_value CONTAINER_API_KEY)" "$(env_value JUPYTER_TOKEN)"; do
+GITHUB_ENV_FILE="${RHABLATION_GITHUB_ENV:-$HOME/.config/rhablation/github.env}"
+GH_TOKEN_VALUE="$(sed -n 's/^GH_TOKEN=//p' "$GITHUB_ENV_FILE" 2>/dev/null | tail -1)"
+for value in "$HF_TOKEN" "$GH_TOKEN_VALUE" "$(env_value CONTAINER_API_KEY)" "$(env_value JUPYTER_TOKEN)"; do
   [ "${#value}" -ge 8 ] || continue
   bad+="$(grep -rlF -- "$value" "$STAGE" || true)"$'\n'
 done
-bad+="$(grep -rlE 'hf_[A-Za-z0-9]{30,}|sk-ant-[A-Za-z0-9_-]{20,}' "$STAGE" || true)"$'\n'
+bad+="$(grep -rlE 'hf_[A-Za-z0-9]{30,}|sk-ant-[A-Za-z0-9_-]{20,}|github_pat_[A-Za-z0-9_]{30,}|gh[pousr]_[A-Za-z0-9]{30,}' "$STAGE" || true)"$'\n'
 bad+="$(find "$STAGE" -type f \( -name '.credentials.json' -o -name 'id_rsa*' -o -name 'id_ed25519*' \))"
 bad="$(printf '%s\n' "$bad" | sed "s|^$STAGE/||" | sort -u | sed '/^$/d')"
 [ -z "$bad" ] || die "credential found, nothing uploaded. Remove it from: $(echo "$bad" | tr '\n' ' ')"
