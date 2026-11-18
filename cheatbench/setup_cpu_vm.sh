@@ -123,11 +123,11 @@ sudo -u "$RUN_USER" unshare --user --map-root-user --mount --pid --fork --mount-
 echo "unprivileged namespaces ok for $RUN_USER"
 chmod 700 /root
 install -d -m 700 /root/.config /root/.config/rhablation
-for p in /root /root/.config/rhablation/upload.env "$TUNNEL_DIR/id_ed25519" /usr/local/sbin/request-gpubox-stop \
+for p in /root /root/.config/rhablation/upload.env /root/.config/rhablation/github.env "$TUNNEL_DIR/id_ed25519" /usr/local/sbin/request-gpubox-stop \
          /usr/local/sbin/request-gpubox-row; do
   if sudo -u "$RUN_USER" test -r "$p" 2>/dev/null && [ -e "$p" ]; then die "$RUN_USER can read $p"; fi
 done
-echo "ok   $RUN_USER cannot read /root (upload token, Claude login, done and row keys) or the tunnel key"
+echo "ok   $RUN_USER cannot read /root (upload and GitHub tokens, Claude login, done and row keys) or the tunnel key"
 [ -f /root/.config/rhablation/upload.env ] \
   || echo "NOTE: /root/.config/rhablation/upload.env missing: copy it from the laptop before an unattended run"
 

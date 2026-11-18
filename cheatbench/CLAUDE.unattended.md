@@ -47,7 +47,7 @@ rules apply on this VM only and override the project `CLAUDE.md` wherever the tw
   until the final step.
 - **Do not run `sweep/upload_code.sh`** (it mirrors to `sweep/code/` and would delete the GPU box's code there).
   This mission should need no new code; if a small wrapper is unavoidable, put it under `cheatbench/` and paste
-  it in full into `LOG.md`. No git commits or pushes, no other way of sending code anywhere.
+  it in full into `LOG.md`. Git only as in `sweep/CLAUDE.unattended.md` (as root, repos and branch from the mission, never `main`, never force); no other way of sending code anywhere.
 - Never modify CheatBench's scoring, tasks or prompts.
 
 ## Exceptions for `cheatbench/mission_capability.md` and `cheatbench/mission_persistence_tb.md` only
