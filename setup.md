@@ -110,8 +110,11 @@ no inbound SSH connection (your terminal, VS Code, Claude Code, an rsync/scp pul
 benchmark/export/upload/copy process, and no vLLM requests in flight. While you stay connected it
 keeps waiting, and stops 30 minutes after you leave.
 
-- Keep the box up: `touch /tmp/rhablation-no-stop` (remove the file before the next run), or kill
-  the tmux session. Status lines go to the terminal and `/tmp/stop_box_when_idle.log`.
+- Keep the box up for a while: `touch /tmp/rhablation-no-stop` pauses the watchdog (the idle count
+  restarts while the file exists; delete it to resume). A terminal with no input for 30 minutes
+  (`SSH_IDLE_MINUTES`), including a forgotten `tmux attach`, no longer keeps the box up; rsync/scp and
+  other non-terminal SSH connections still do. At the end of a mission run
+  `bash scripts/stop_box_when_idle.sh --now` (stops once no eval, upload or vLLM request is running). Status lines go to the terminal and `/tmp/stop_box_when_idle.log`.
 - If the upload failed, or with `--no-upload`, the box is **not** stopped: the only copy of the
   run would be on its disk.
 - It is a Vast "stop", not "destroy": the disk is kept and storage is still billed. Restarting

@@ -125,11 +125,10 @@ if [ "$WATCHDOG" = 1 ]; then
   step "Watchdog: stop the box after $WATCHDOG_MINUTES idle minutes"
   if tmux has-session -t watchdog 2>/dev/null; then
     echo "already armed; left untouched (log: /tmp/stop_box_when_idle.log)"
-  elif [ -e "$CANCEL_FILE" ]; then
-    echo "WARNING: $CANCEL_FILE exists, so auto-stop is cancelled. Remove it and re-run to arm the watchdog."
   elif bash "$REPO_DIR/scripts/stop_box_when_idle.sh" --check; then
     tmux new-session -d -s watchdog -c "$REPO_DIR" "bash scripts/stop_box_when_idle.sh --idle-minutes $WATCHDOG_MINUTES"
     echo "armed (log: /tmp/stop_box_when_idle.log)"
+    [ ! -e "$CANCEL_FILE" ] || echo "WARNING: $CANCEL_FILE exists, so the watchdog is paused until it is deleted."
   else
     echo "WARNING: this box cannot stop itself; no watchdog. A stalled session will keep billing."
   fi

@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
 # Stop this Vast.ai instance once it has been idle, with nobody connected, for N minutes in a row.
 #   bash scripts/stop_box_when_idle.sh [--idle-minutes 30] [--check]
+#   bash scripts/stop_box_when_idle.sh --now      # a mission's last step: stop as soon as no eval/upload/vLLM request is running
 # Run as root on the box (stage1_pipeline.sh hands over to it after a successful upload).
 # "Stop" halts GPU charges and keeps the disk; it is not "destroy". Busy means any of: an inbound
-# SSH connection (terminal, VS Code, rsync/scp), a benchmark/export/upload/copy process, vLLM
-# requests in flight, or an unattended Claude Code session that wrote to its transcript recently. Cancel with: touch /tmp/rhablation-no-stop
-# SSH connections from the CheatBench VM's tunnel do not count (see TUNNEL_PEERS_FILE below); a stop request from
-# that VM (STOP_REQUEST_FILE) skips the rest of the idle window.
+# SSH connection in use (a non-terminal one such as rsync/scp/a command, or a terminal typed into in the last
+# SSH_IDLE_MINUTES; a forgotten terminal or tmux attach does not hold the box up), a benchmark/export/upload/copy
+# process, vLLM requests in flight, or an unattended Claude Code session that wrote to its transcript recently.
+# Pause with: touch /tmp/rhablation-no-stop (the idle count restarts while it exists; delete it to resume). It no
+# longer ends the watchdog: on 2026-11-18 a no-stop file ended it and an idle H200 ran 7 h after its mission.
+# SSH connections from the CheatBench VM's tunnel do not count (see TUNNEL_PEERS_FILE below); a stop request
+# (STOP_REQUEST_FILE, from that VM or from --now) skips the rest of the idle window and ignores SSH and Claude activity.
 # --check only verifies that the instance can stop itself (used as a preflight).
 set -uo pipefail
 
@@ -14,12 +18,14 @@ die() { echo "ERROR: $*" >&2; exit 1; }
 
 IDLE_MINUTES=30
 CHECK=0
+NOW=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --idle-minutes) IDLE_MINUTES="${2:-}"; shift 2 ;;
     --idle-minutes=*) IDLE_MINUTES="${1#*=}"; shift ;;
     --check) CHECK=1; shift ;;
-    -h|--help) sed -n '2,8p' "$0"; exit 0 ;;
+    --now) NOW=1; shift ;;
+    -h|--help) sed -n '2,13p' "$0"; exit 0 ;;
     *) die "unknown argument: $1" ;;
   esac
 done
@@ -33,6 +39,7 @@ STOP_REQUEST_FILE="${RHABLATION_STOP_REQUEST_FILE:-/tmp/rhablation-stop-requeste
 LOG=/tmp/stop_box_when_idle.log
 CLAUDE_PROJECTS_DIR="${CLAUDE_PROJECTS_DIR:-$HOME/.claude/projects}"
 CLAUDE_ACTIVE_MINUTES="${CLAUDE_ACTIVE_MINUTES:-15}"
+SSH_IDLE_MINUTES="${SSH_IDLE_MINUTES:-30}"   # a terminal session with no input for this long is not "somebody connected"
 # SSH connections from these addresses (one per line, written by cheatbench/allow_tunnel_key.sh) are not
 # "somebody connected": the CheatBench VM keeps its vLLM tunnel open for the whole run and beyond, and its
 # actual use already shows up as vLLM requests in flight. Re-read every minute.
@@ -81,7 +88,19 @@ busy_reason() {
     { p = $NF; sub(/:[0-9]+$/, "", p); gsub(/[][]/, "", p); sub(/^::ffff:/, "", p)
       if (index(peers, " " p " ") == 0) n++ }
     END { print n + 0 }')"
-  if [ "$n" -gt 0 ]; then echo "$n ssh connection(s)"; return; fi
+  if [ "$n" -gt 0 ] && [ ! -e "$STOP_REQUEST_FILE" ]; then
+    # sshd names each session's process "sshd[-session]: <user>@pts/N" (a terminal) or "...@notty" (rsync, scp, a command).
+    # Busy if a non-tunnel connection has no terminal, or a terminal had input in the last SSH_IDLE_MINUTES (a pty's atime
+    # is its last input; output from a tmux the session is attached to does not touch it). With no session names to read
+    # (an sshd that does not set them) every connection counts, as before.
+    local ttys active=0 t
+    ttys="$(ps -eo args= 2>/dev/null | sed -n 's/^sshd[-a-z]*: [^ ]*@\(pts\/[0-9]*\).*/\1/p' | sort -u)"
+    if [ -z "$ttys" ] || [ "$n" -gt "$(echo "$ttys" | grep -c .)" ]; then echo "$n ssh connection(s)"; return; fi
+    for t in $ttys; do
+      [ -n "$(find "/dev/$t" -amin "-$SSH_IDLE_MINUTES" 2>/dev/null)" ] && active=$((active + 1))
+    done
+    if [ "$active" -gt 0 ]; then echo "$n ssh connection(s), $active typed into in the last $SSH_IDLE_MINUTES min"; return; fi
+  fi
   procs="$(pgrep -f "$BUSY_PROCS" 2>/dev/null | while read -r p; do
     case "$ANCESTORS" in *" $p "*) continue ;; esac
     case "$(ps -o comm= -p "$p" 2>/dev/null)" in tmux*|'') continue ;; esac
@@ -93,7 +112,7 @@ busy_reason() {
   if [ "${n:-0}" -gt 0 ]; then echo "$n vLLM request(s) in flight"; return; fi
   # An unattended Claude Code session that is working appends to its transcript all the time; one that
   # hit a usage limit, crashed or finished does not.
-  if [ -n "$(find "$CLAUDE_PROJECTS_DIR" -name '*.jsonl' -mmin "-$CLAUDE_ACTIVE_MINUTES" -print -quit 2>/dev/null)" ]; then
+  if [ ! -e "$STOP_REQUEST_FILE" ] && [ -n "$(find "$CLAUDE_PROJECTS_DIR" -name '*.jsonl' -mmin "-$CLAUDE_ACTIVE_MINUTES" -print -quit 2>/dev/null)" ]; then
     echo "claude active in the last $CLAUDE_ACTIVE_MINUTES min"; return
   fi
 }
@@ -101,10 +120,11 @@ busy_reason() {
 say() { echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $*" | tee -a "$LOG"; }
 
 say "auto-stop armed: instance $CONTAINER_ID stops after $IDLE_MINUTES idle minutes in a row. Cancel: touch $CANCEL_FILE"
-if [ -e "$STOP_REQUEST_FILE" ]; then rm -f "$STOP_REQUEST_FILE"; say "removed a stale stop request"; fi
+if [ "$NOW" = 1 ]; then touch "$STOP_REQUEST_FILE"; say "--now: stopping as soon as no eval, upload or vLLM request is running (SSH and Claude activity ignored)"
+elif [ -e "$STOP_REQUEST_FILE" ]; then rm -f "$STOP_REQUEST_FILE"; say "removed a stale stop request"; fi
 idle=0
 while :; do
-  if [ -e "$CANCEL_FILE" ]; then say "cancelled by $CANCEL_FILE; box left running"; exit 0; fi
+  if [ -e "$CANCEL_FILE" ]; then idle=0; say "paused by $CANCEL_FILE (delete it to resume)"; sleep 60; continue; fi
   reason="$(busy_reason)"
   if [ -n "$reason" ]; then
     idle=0

@@ -77,11 +77,10 @@ fi
 if tmux has-session -t watchdog 2>/dev/null; then
   echo "a watchdog is already running and was left alone. If it was started before tunnel_peers existed,"
   echo "it counts the tunnel as busy and the box never stops: re-run with RESTART_WATCHDOG=1."
-elif [ -e "$CANCEL_FILE" ]; then
-  echo "WARNING: $CANCEL_FILE exists, so auto-stop is cancelled; the box keeps billing until stopped by hand."
 elif bash "$REPO_DIR/scripts/stop_box_when_idle.sh" --check; then
   tmux new-session -d -s watchdog -c "$REPO_DIR" "bash scripts/stop_box_when_idle.sh --idle-minutes $WATCHDOG_MINUTES"
   echo "watchdog armed: the box stops after $WATCHDOG_MINUTES idle minutes (log: /tmp/stop_box_when_idle.log)"
+  [ ! -e "$CANCEL_FILE" ] || echo "WARNING: $CANCEL_FILE exists, so the watchdog is paused until it is deleted."
 else
   echo "WARNING: this box cannot stop itself; no watchdog. Stop it by hand when the VM is done."
 fi
