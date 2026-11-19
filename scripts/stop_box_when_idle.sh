@@ -47,7 +47,11 @@ TUNNEL_PEERS_FILE="${RHABLATION_TUNNEL_PEERS:-/root/.config/rhablation/tunnel_pe
 # Downloads and installs count as busy so a long gap between runs (new model, new env) is not idle.
 # A `claude` process alone is deliberately not busy: a stalled or finished one must not hold the box up.
 # What counts is its session transcript having been written to recently (CLAUDE_ACTIVE_MINUTES).
-BUSY_PROCS='stage1_run_benchmark|stage1_pipeline|stage1_export|stage1_validate|stage4_cache_activations|stage4_directions|stage5_|stage6_|upload_run|hf upload|hf download|uv (sync|pip)|docker (pull|build)|(^|[ /])(rsync|scp|sftp-server)( |$)'
+# Ethan's ortho scripts (kto_refusal.py, run.py, train_lora.py, ...) count too: on 2026-11-19 a box stopped mid-mission while
+# kto_refusal.py check ran on the GPU with no vLLM server up and the agent waited quietly on it. GPU_BUSY_PERCENT is the backstop for
+# any other GPU job: the highest utilisation over three samples a second apart (an idle vLLM server holds memory but sits at 0 %).
+BUSY_PROCS='stage1_run_benchmark|stage1_pipeline|stage1_export|stage1_validate|stage4_cache_activations|stage4_directions|stage5_|stage6_|kto_refusal|kto_sweep|train_lora|train_vector|refusal_dom|/run\.py|upload_run|hf upload|hf download|uv (sync|pip)|docker (pull|build)|(^|[ /])(rsync|scp|sftp-server)( |$)'
+GPU_BUSY_PERCENT="${GPU_BUSY_PERCENT:-10}"
 
 # Only these two lines are read; the file holds other host-injected secrets.
 env_value() { grep -E "^(export )?$1=" /etc/environment 2>/dev/null | tail -1 | sed -E "s/^(export )?$1=//; s/^[\"']//; s/[\"']\$//"; }
@@ -110,6 +114,8 @@ busy_reason() {
   n="$(curl -s -m 5 "localhost:$PORT/metrics" 2>/dev/null \
     | awk '/^vllm:num_requests_(running|waiting)\{/ { s += $NF } END { printf "%d", s }')"
   if [ "${n:-0}" -gt 0 ]; then echo "$n vLLM request(s) in flight"; return; fi
+  n="$(for _ in 1 2 3; do nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits 2>/dev/null; sleep 1; done | sort -n | tail -1 | tr -d ' ')"
+  if [ "${n:-0}" -ge "$GPU_BUSY_PERCENT" ] 2>/dev/null; then echo "GPU at ${n} %"; return; fi
   # An unattended Claude Code session that is working appends to its transcript all the time; one that
   # hit a usage limit, crashed or finished does not.
   if [ ! -e "$STOP_REQUEST_FILE" ] && [ -n "$(find "$CLAUDE_PROJECTS_DIR" -name '*.jsonl' -mmin "-$CLAUDE_ACTIVE_MINUTES" -print -quit 2>/dev/null)" ]; then
