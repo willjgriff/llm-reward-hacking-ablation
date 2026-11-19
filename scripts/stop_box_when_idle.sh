@@ -107,7 +107,7 @@ busy_reason() {
   fi
   procs="$(pgrep -f "$BUSY_PROCS" 2>/dev/null | while read -r p; do
     case "$ANCESTORS" in *" $p "*) continue ;; esac
-    case "$(ps -o comm= -p "$p" 2>/dev/null)" in tmux*|'') continue ;; esac
+    case "$(ps -o comm= -p "$p" 2>/dev/null)" in tmux*|claude|'') continue ;; esac   # claude: its start prompt names the mission file (kto_refusal...), and a claude process alone is not busy
     ps -o comm= -p "$p"
   done | sort -u | tr '\n' ' ')"
   if [ -n "$procs" ]; then echo "running: $procs"; return; fi
