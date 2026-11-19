@@ -1,13 +1,21 @@
-# KTO refusal control, update 1 (laptop, 2026-11-19 ~22:45 UTC)
+# KTO refusal control, update 1: resume on a new box (laptop, 2026-11-19 ~23:00 UTC)
 
-**What happened:** the box was stopped by the idle watchdog at about 19:45 UTC, during stage `check`. The watchdog's busy list covered this project's scripts but not ortho's (`kto_refusal.py`, `run.py`, `train_lora.py`). `check` runs on the GPU with no vLLM server up, and your session was waiting on it without writing, so the box looked idle. The fault is in the watchdog, not in your work.
+Read `sweep/mission_kto_refusal.md` first; this update changes only what is said here.
 
-**Fix (already on this box):** `scripts/stop_box_when_idle.sh` now counts ortho's scripts and any GPU utilisation of 10 % or more as busy. The laptop restarted the watchdog with the new version (30 idle minutes).
+## What happened
+The first box (instance 61481990) ran setup, sample and train, uploaded their outputs at 19:00 UTC, and was then stopped by the idle watchdog at about 19:45 UTC, during stage `check`. The watchdog's busy list covered this project's scripts but not ortho's (`kto_refusal.py`, `run.py`, `train_lora.py`). `check` runs on the GPU with no vLLM server up, and the session was waiting on it without writing, so the box looked idle. The instance could not be restarted, so you are on a new box. The fault was in the watchdog, not in the work. `scripts/stop_box_when_idle.sh` now also counts ortho's scripts, and any GPU utilisation of 10 % or more, as busy.
 
-**Resume:**
-1. Check what survived on disk (the stop keeps it): `acts/kto_refusal/results.jsonl` and `vecs/` (all five configs), `~/hooks/r*.safetensors`, and whether `acts/kto_refusal/check.json` exists. Log what you find.
-2. If `check.json` is missing, rerun stage `check`. vLLM is not running after the restart, and tmux sessions are gone.
-3. Continue with `suite`, then `lora` if the table's rule says so, exactly as in the mission.
-4. **New budget: 8 h from your resume**, which replaces the 02:52 UTC end. The time the box was stopped does not count.
-
-Everything else in `sweep/mission_kto_refusal.md` is unchanged, including the uploads and the final immediate stop.
+## Resume
+1. Fetch the first box's report into `box_report/kto_refusal/` (`kto_refusal/kto_refusal/LOG.md` and `SUMMARY.md` in the private repo), and append to that LOG from here on.
+2. Clone the fork as in the mission (`claude` branch into `/root/ortho`, branch `box/kto-refusal`), then run stage `setup`.
+3. **Do not rerun `sample` or `train`.** Restore their outputs from the private repo as root. Read the token from `upload.env` into the environment of the download command only; never write it to a file. Download `kto_refusal/{acts,vectors,records}` and place them as follows:
+   - `acts/*` → `/root/ortho/acts/kto_refusal/`: `base.pt`, `results.jsonl`, `vecs/*.pt`
+   - `vectors/refusal_r*` → `/root/ortho/data/vectors/Qwen3.8-27B/`
+   - `vectors/r*.safetensors` (rkto, rktopt, rktoall, rkrand, rkrandall) → `/root/hooks/`
+   - `records/refusal/*.jsonl` → `/root/ortho/data/inspect/refusal/`: the harmless train neutrals (`refusal38_train_harmless`) and the smoke run
+4. Check the restore and log it:
+   - `./kto_refusal.py data` prints the first box's counts (796 / 798 / 400; 100 / 100 / 100);
+   - `results.jsonl` holds rksmoke plus the five configs;
+   - `~/hooks` holds the five hook files.
+5. Run `check`, then `suite`, then `lora` if the table's rule says so, then finish, all exactly as in the mission. Uploads go to the same `kto_refusal/` paths (they add to what is there).
+6. **New budget: 8 h from your start on this box**, which replaces the first box's 02:52 UTC end.
