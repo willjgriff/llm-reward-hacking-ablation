@@ -46,6 +46,10 @@ EVAL_CELLS = {
     "rkrandall_off": "rkrandall_harmful", "rkrandall_low": "rkrandall_harmful_low",
     "refusallora_off": "refusallora_harmful", "refusallora_low": "refusallora_harmful_low",
     "refusallorafinal_off": "refusallorafinal_harmful", "refusallorafinal_low": "refusallorafinal_harmful_low",
+    # part 2 (kto_orthog): every-layer, every-position hook and its weight edits
+    **{f"{row}_{s}": f"{row}_harmful" + ("_low" if s == "low" else "")
+       for row in ("rkfull", "base_w", "rkfull_wm", "rkfull_wz", "rkfullrand_wm", "rkfullrand_wz", "rktoall_wz")
+       for s in ("off", "low")},
 }
 TRAIN_CELLS = {"train_base_refusing": ("none", True), "train_refdom_compliant": ("refdom_harmful_train", False)}
 REASONING_CHARS, ANSWER_CHARS = 3000, 8000
@@ -169,7 +173,8 @@ def report(out_dir: Path) -> str:
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--records", type=Path, nargs="+", default=[Path("data/ortho_eekay/data/inspect/refusal"),
-                                                                 Path("data/kto_refusal_hf/kto_refusal/records/refusal")])
+                                                                 Path("data/kto_refusal_hf/kto_refusal/records/refusal"),
+                                                                 Path("data/kto_orthog_hf/kto_orthog/records")])
     p.add_argument("--out", type=Path, default=Path("data/refusal_judge"))
     p.add_argument("--model", default=DEFAULT_MODEL)
     p.add_argument("--effort", default="low", choices=("none", "low", "medium", "high"))
@@ -194,7 +199,14 @@ def main() -> None:
     by_id = {r["rollout_id"]: r for rs in recs.values() for r in rs}
     sample_path = out_dir / "sample.json"
     if sample_path.exists():
-        items = json.loads(sample_path.read_text())["items"]
+        cached = json.loads(sample_path.read_text())
+        items = cached["items"]
+        # cells added to EVAL_CELLS since the sample was written: same seed, so the same keys as the old cells
+        have = {it["cell"] for it in items}
+        if set(EVAL_CELLS) - have:
+            items += [it for it in build_sample(recs, cached["n"], cached["seed"], args.all) if it["cell"] not in have]
+            cached.update(items=items, records=sorted(set(cached["records"]) | {str(d) for d in args.records}))
+            sample_path.write_text(json.dumps(cached, indent=1))
     else:
         items = build_sample(recs, args.n, args.seed, args.all)
         sample_path.write_text(json.dumps({"seed": args.seed, "n": args.n, "records": [str(d) for d in args.records], "items": items}, indent=1))
