@@ -13,6 +13,7 @@ training data (base refusals and refdom's compliant answers, by heretic's label)
   uv run scripts/refusal_judge.py --dry-run
   uv run scripts/refusal_judge.py --workers 16
   uv run scripts/refusal_judge.py --report-only
+  uv run scripts/refusal_judge.py --all --workers 24   # every harmful test answer per eval cell (out dir `..__all`)
 
 Output: <out>/<model>__<effort>/{sample.json, labels.jsonl, failures.jsonl, report.md}; resumable.
 """
@@ -41,6 +42,8 @@ EVAL_CELLS = {
     "rkto_off": "rkto_harmful", "rkto_low": "rkto_harmful_low",
     "rktopt_off": "rktopt_harmful", "rktopt_low": "rktopt_harmful_low",
     "rktoall_off": "rktoall_harmful", "rktoall_low": "rktoall_harmful_low",
+    "rkrand_off": "rkrand_harmful", "rkrand_low": "rkrand_harmful_low",
+    "rkrandall_off": "rkrandall_harmful", "rkrandall_low": "rkrandall_harmful_low",
     "refusallora_off": "refusallora_harmful", "refusallora_low": "refusallora_harmful_low",
     "refusallorafinal_off": "refusallorafinal_harmful", "refusallorafinal_low": "refusallorafinal_harmful_low",
 }
@@ -66,7 +69,13 @@ def key_of(r: dict) -> tuple[int, str]:
     return r["labels"]["index"], r["rollout_id"].rsplit("/", 1)[1]
 
 
-def build_sample(recs, n: int, seed: int) -> list[dict]:
+def wilson(k: int, n: int, z: float = 1.96) -> tuple[float, float]:
+    p, d = k / n, 1 + z * z / n
+    c, h = (p + z * z / (2 * n)) / d, z * (p * (1 - p) / n + z * z / (4 * n * n)) ** 0.5 / d
+    return 100 * max(0.0, c - h), 100 * min(1.0, c + h)
+
+
+def build_sample(recs, n: int, seed: int, all_eval: bool = False) -> list[dict]:
     rng = random.Random(seed)
     items = []
     def find(cond: str, cfg: str, split: str):
@@ -84,7 +93,7 @@ def build_sample(recs, n: int, seed: int) -> list[dict]:
     for cell, spec in EVAL_CELLS.items():
         cond, cfg = spec.split(":") if ":" in spec else (spec, "qwen3.8_low" if spec.endswith("_low") else "nothink")
         table = {key_of(r): r for r in find(cond, cfg, "test")}
-        for k in keys:
+        for k in (sorted(table) if all_eval else keys):
             r = table[k]
             items.append({"cell": cell, "rollout_id": r["rollout_id"], "heretic_refused": r["labels"].get("refused")})
     for cell, (cond, want) in TRAIN_CELLS.items():
@@ -126,10 +135,11 @@ def report(out_dir: Path) -> str:
     cells = list(EVAL_CELLS) + list(TRAIN_CELLS)
     lines = [f"# Refusal judge: {out_dir.name}", "",
              f"{len(labels)} answers judged, cost ${sum(float(x.get('cost_usd') or 0) for x in labels):.2f}. "
-             "Eval cells: the same 50 harmful test prompt/sample keys in every cell (paired). "
+             "Eval cells: harmful test answers (sample mode: the same 50 prompt/sample keys in every cell, paired; "
+             "`--all`: every answer of the cell). "
              "Train cells: 50 random answers from the KTO training pools by heretic's label. "
              "`off` = reasoning off, `low` = effort low.", "",
-             "| cell | n | refusal | partial | compliance | degenerate | not refused (partial + compliance) % | heretic refused % | coherent % | helpfulness mean | quote found % |",
+             "| cell | n | refusal | partial | compliance | degenerate | not refused (partial + compliance) % [95% CI] | heretic refused % | coherent % | helpfulness mean | quote found % |",
              "|---|---|---|---|---|---|---|---|---|---|---|"]
     for c in cells:
         xs = [x for x in labels if x["cell"] == c]
@@ -138,7 +148,7 @@ def report(out_dir: Path) -> str:
         v = Counter(x["verdict"] for x in xs)
         n = len(xs)
         lines.append(f"| {c} | {n} | {v['refusal']} | {v['partial']} | {v['compliance']} | {v['degenerate']} | "
-                     f"{100 * (v['partial'] + v['compliance']) / n:.0f} | {100 * sum(bool(x['heretic_refused']) for x in xs) / n:.0f} | "
+                     f"{100 * (v['partial'] + v['compliance']) / n:.1f} [{wilson(v['partial'] + v['compliance'], n)[0]:.1f}, {wilson(v['partial'] + v['compliance'], n)[1]:.1f}] | {100 * sum(bool(x['heretic_refused']) for x in xs) / n:.0f} | "
                      f"{100 * sum(bool(x['coherent']) for x in xs) / n:.0f} | {sum(x['helpfulness'] for x in xs) / n:.2f} | "
                      f"{100 * sum(x['quote_found'] for x in xs) / n:.0f} |")
     lines += ["", "## Judge verdict vs heretic's label", "", "| cell | heretic refused: refusal / partial / compliance / degenerate | heretic not refused: refusal / partial / compliance / degenerate |", "|---|---|---|"]
@@ -170,9 +180,10 @@ def main() -> None:
     p.add_argument("--quantizations", default="fp8,bf16,fp16,int8")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--report-only", action="store_true")
+    p.add_argument("--all", action="store_true", help="every harmful test answer per eval cell (train cells stay at --n)")
     args = p.parse_args()
 
-    out_dir = args.out / f"{args.model.replace('/', '_')}__{args.effort}"
+    out_dir = args.out / f"{args.model.replace('/', '_')}__{args.effort}{'__all' if args.all else ''}"
     out_dir.mkdir(parents=True, exist_ok=True)
     if args.report_only:
         (out_dir / "report.md").write_text(report(out_dir))
@@ -185,7 +196,7 @@ def main() -> None:
     if sample_path.exists():
         items = json.loads(sample_path.read_text())["items"]
     else:
-        items = build_sample(recs, args.n, args.seed)
+        items = build_sample(recs, args.n, args.seed, args.all)
         sample_path.write_text(json.dumps({"seed": args.seed, "n": args.n, "records": [str(d) for d in args.records], "items": items}, indent=1))
     rubric = RUBRIC.read_text()
     labels_path, failures_path = out_dir / "labels.jsonl", out_dir / "failures.jsonl"
