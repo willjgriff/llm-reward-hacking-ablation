@@ -50,7 +50,7 @@ Mechanical check of each edited model, in HF, before serving it (hard gate; fix 
 - `_wz`: it must be about 0. Report its size next to the base model's component.
 - `_wm`: it must equal `c_L`, to bf16 precision.
 
-Storage: write each edited model as a checkpoint whose unchanged shards are symlinks to the base weights, as `stage9_bias_checkpoint.py --link` did. Delete each checkpoint after its evals and checks; the direction file plus the script rebuild it.
+Storage (the box has about 150 GB of disk): write only the edited tensors (embedding, attention output projections, `down_proj` weights, and the biases; about 9B parameters, ~18 GB) to a new shard file. Symlink the base model's shards, and rewrite `model.safetensors.index.json` so the edited tensors' entries point to the new file. This is how `stage9_bias_checkpoint.py --link` added its bias shard. The edited tensors are spread across every base shard, so a checkpoint that copied changed shards would be a full 55 GB copy. Keep one edited checkpoint on disk at a time: delete it after its evals and checks, since the direction file plus the script rebuild it.
 
 ## Rows
 All rows are evaluated with the same four refusal runs: heretic's 100 harmful and 100 harmless test prompts, reasoning off and effort low, 4 samples each, as `<row>_harmful`, `_harmless`, `_harmful_low`, `_harmless_low` in part 1.
