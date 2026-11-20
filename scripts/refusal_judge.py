@@ -40,6 +40,8 @@ EVAL_CELLS = {
     "refdom_off": "refdom_harmful", "refdom_low": "refdom_harmful_low",
     "rkto_low": "rkto_harmful_low", "rktopt_low": "rktopt_harmful_low",
     "rktoall_off": "rktoall_harmful", "rktoall_low": "rktoall_harmful_low",
+    "refusallora_off": "refusallora_harmful", "refusallora_low": "refusallora_harmful_low",
+    "refusallorafinal_off": "refusallorafinal_harmful", "refusallorafinal_low": "refusallorafinal_harmful_low",
 }
 TRAIN_CELLS = {"train_base_refusing": ("none", True), "train_refdom_compliant": ("refdom_harmful_train", False)}
 REASONING_CHARS, ANSWER_CHARS = 3000, 8000
