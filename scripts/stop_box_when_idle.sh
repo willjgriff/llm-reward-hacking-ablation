@@ -50,7 +50,7 @@ TUNNEL_PEERS_FILE="${RHABLATION_TUNNEL_PEERS:-/root/.config/rhablation/tunnel_pe
 # Ethan's ortho scripts (kto_refusal.py, run.py, train_lora.py, ...) count too: on 2026-11-19 a box stopped mid-mission while
 # kto_refusal.py check ran on the GPU with no vLLM server up and the agent waited quietly on it. GPU_BUSY_PERCENT is the backstop for
 # any other GPU job: the highest utilisation over three samples a second apart (an idle vLLM server holds memory but sits at 0 %).
-BUSY_PROCS='stage1_run_benchmark|stage1_pipeline|stage1_export|stage1_validate|stage4_cache_activations|stage4_directions|stage5_|stage6_|kto_refusal|kto_sweep|train_lora|train_vector|refusal_dom|/run\.py|upload_run|hf upload|hf download|uv (sync|pip)|docker (pull|build)|(^|[ /])(rsync|scp|sftp-server)( |$)'
+BUSY_PROCS='stage1_run_benchmark|stage1_pipeline|stage1_export|stage1_validate|stage4_cache_activations|stage4_directions|stage5_|stage6_|kto_refusal|kto_orthog|kto_sweep|train_lora|train_vector|refusal_dom|/run\.py|upload_run|hf upload|hf download|uv (sync|pip)|docker (pull|build)|(^|[ /])(rsync|scp|sftp-server)( |$)'
 GPU_BUSY_PERCENT="${GPU_BUSY_PERCENT:-10}"
 
 # Only these two lines are read; the file holds other host-injected secrets.
