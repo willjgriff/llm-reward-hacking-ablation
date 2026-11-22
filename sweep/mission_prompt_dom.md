@@ -145,7 +145,7 @@ For each environment, a row is compared with `base` and with its random control,
 ## SUMMARY.md
 - **Data:** the family check results; the TV pair counts per filter step; 3 pair diffs.
 - **Gates:** the `refdom` reproduction cosines; the Arditi candidate tables (top 10 per env, with the chosen candidate's layer, position, bypass, induce and KL).
-- **One results table:** every row × every eval, with hack / cheat, valid, TV passed / tampered / peeked, possible pass rate, MMLU vs base and first-token KL, each with a Wilson interval and n. Add Ethan's `domlast` and `refdom` rows from his records, labelled as his.
+- **One results table:** every row × every eval, with hack / cheat, valid, TV passed / tampered / peeked, possible pass rate, MMLU vs base and first-token KL, each with a Wilson interval and n. Add Ethan's `domlast` and `refdom` rows from his records, labelled as his. Add the protocol's transfer rows on the same evals from his records, also labelled as his: `kto` (`grader_kto`), `mbppkto`, `graderlora`, `mbpplora`. They come from his server, so they are context only, not part of the rule. If more than 3 h of budget remain after tier 2, serve `kto` and `mbppkto` on this box (Ethan's `scripts/box_proj_setup.sh` rows) and run tier 1 on them.
 - **The cosine and AUROC tables.**
 - **Samples:** 3 hack and 3 non-hack answers per R/A row on the Grader (reasoning off and low), and for TV the command sequences of 5 episodes per row. Pick them at evenly spaced positions in the run, not by hand.
 - **Every deviation from this mission,** and a short "What I would do next".
