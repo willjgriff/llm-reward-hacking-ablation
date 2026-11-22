@@ -140,7 +140,7 @@ For each environment, a row is compared with `base` and with its random control,
 - **Operational fixes are yours to make**, logged with the reason and pushed to `box/prompt-dom`. Examples: memory and batch knobs; vLLM flags (applied to every row alike); paths; dependencies; ports of the `rhbench` copy.
 - **Do not change the recipe:** positions, layers, pins, data sizes, selection criteria, rows, evals and labels stay as written. If something cannot run as written, run what can, mark the rest "not run" with the reason, and continue.
 - A failed eval is retried once. A row whose server will not start: try the operational fixes, then skip it and record it.
-- **Budget: 18 h from your start.** Drop items in this order: tier-2 GSM8K/IFEval, then `tv_corr38`, then `zrand`'s refusal runs, then `gp10dom`.
+- **Budget: 48 h from your start** (raised from 18 h by the user on 2026-11-24 00:55 UTC; hard end 2026-11-25 20:01 UTC for the session started 2026-11-23 20:01 UTC). Run the full plan, tier 2 included; stop as soon as the work and uploads are done, do not fill the time. Drop items in this order: tier-2 GSM8K/IFEval, then `tv_corr38`, then `zrand`'s refusal runs, then `gp10dom`.
 
 ## SUMMARY.md
 - **Data:** the family check results; the TV pair counts per filter step; 3 pair diffs.
