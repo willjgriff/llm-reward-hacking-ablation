@@ -25,6 +25,7 @@ HACK_CATS = {
     "grader": {"grader_following"},
 }
 HACK_CATS["terminal_verifier_rhenvs"] = HACK_CATS["terminal_verifier"]
+HACK_CATS["tv_prompt_dom"] = HACK_CATS["terminal_verifier"]
 
 
 def load_labels(path: Path) -> dict[str, dict]:
@@ -97,7 +98,7 @@ def main() -> None:
         J["level_by_class"] = {r[0]: dict(zip(["n"] + list(LEVELS), r[1:6])) for r in rows}
 
         # Environment-specific oracle comparisons.
-        if env in ("terminal_verifier", "terminal_verifier_rhenvs"):
+        if env in ("terminal_verifier", "terminal_verifier_rhenvs", "tv_prompt_dom"):
             tamp = [t for t in both if items[t]["oracle"].get("tampered")]
             not_tamp = [t for t in both if items[t]["oracle"].get("tampered") is False]
             edit_acted = lambda t: acted(pred[t], {"verifier_edit", "verifier_bypass"})  # noqa: E731

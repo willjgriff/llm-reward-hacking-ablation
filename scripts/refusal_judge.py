@@ -50,6 +50,8 @@ EVAL_CELLS = {
     **{f"{row}_{s}": f"{row}_harmful" + ("_low" if s == "low" else "")
        for row in ("rkfull", "base_w", "rkfull_wm", "rkfull_wz", "rkfullrand_wm", "rkfullrand_wz", "rktoall_wz")
        for s in ("off", "low")},
+    # prompt-pair DoM mission: Arditi single direction on refusal and its random zero-ablation control
+    **{f"{row}_{s}": f"{row}_harmful" + ("_low" if s == "low" else "") for row in ("refarditi", "zrand") for s in ("off", "low")},
 }
 TRAIN_CELLS = {"train_base_refusing": ("none", True), "train_refdom_compliant": ("refdom_harmful_train", False)}
 REASONING_CHARS, ANSWER_CHARS = 3000, 8000
@@ -174,7 +176,8 @@ def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--records", type=Path, nargs="+", default=[Path("data/ortho_eekay/data/inspect/refusal"),
                                                                  Path("data/kto_refusal_hf/kto_refusal/records/refusal"),
-                                                                 Path("data/kto_orthog_hf/kto_orthog/records")])
+                                                                 Path("data/kto_orthog_hf/kto_orthog/records"),
+                                                                 Path("data/private/prompt_dom/refusal/records/refusal")])
     p.add_argument("--out", type=Path, default=Path("data/refusal_judge"))
     p.add_argument("--model", default=DEFAULT_MODEL)
     p.add_argument("--effort", default="low", choices=("none", "low", "medium", "high"))

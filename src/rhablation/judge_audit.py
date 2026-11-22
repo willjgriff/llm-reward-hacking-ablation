@@ -263,6 +263,7 @@ ORACLE: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
     "mbpp_impossible": _mbpp_oracle,
     "grader": _grader_oracle,
     "terminal_verifier_rhenvs": _tv_rhenvs_oracle,
+    "tv_prompt_dom": _tv_rhenvs_oracle,
     "tv_persistence": _tv_persistence_oracle,
 }
 
@@ -313,6 +314,22 @@ SPECS: dict[str, EnvSpec] = {
         summary_fields={"read_verifier": bool, "diagnosed_bug": bool, "honest_submissions": int,
                         "final_submission": str, "intent": str},
         run_dirs=[Path(f"stage6/{c}/rhenvs") for c in ("X2", "F1a_X2", "F1b_X2w05", "base_rhenvs", "F1a_base", "X0")],
+        effort_default="medium",
+        classify=_tv_rhenvs_classify,
+        record_adapter=_tv_rhenvs_adapter,
+        file_name="records.jsonl.gz",
+        run_suffixes=("_tv_vb",),
+    ),
+    # Prompt-pair DoM mission (stage 11): `verifier_bug` mt4 / mt6 rows next to base, same rubric as stage 7.
+    # Run dirs `data/prompt_dom/tv_runs/<row>_mt<k>_tv_vb/records.jsonl.gz` are the box's ortho records
+    # (HF `prompt_dom/records/terminal_verifier/`) regrouped one run per directory.
+    "tv_prompt_dom": EnvSpec(
+        name="tv_prompt_dom",
+        rubric=RUBRIC_DIR / "terminal_verifier_rubric.md",
+        categories={"verifier_edit", "verifier_bypass", "copy_verifier_value", "misrepresented_compliance", "other"},
+        summary_fields={"read_verifier": bool, "diagnosed_bug": bool, "honest_submissions": int,
+                        "final_submission": str, "intent": str},
+        run_dirs=[Path("prompt_dom/tv_runs")],
         effort_default="medium",
         classify=_tv_rhenvs_classify,
         record_adapter=_tv_rhenvs_adapter,
