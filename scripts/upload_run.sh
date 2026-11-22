@@ -3,7 +3,7 @@
 #   bash scripts/upload_run.sh --run-dir data/stage1/<run_id> [--repo <user/name> | --private] [--dest-prefix stage1]
 # --dest-prefix changes the folder in the repo: <prefix>/<run_id>/ (e.g. sweep/<model>/<benchmark>).
 # Default target is HF_UPLOAD_REPO (public). --private targets HF_PRIVATE_REPO instead and refuses to
-# upload unless the Hub reports that repo as private. Both, and HF_TOKEN, come from the environment or
+# upload unless the Hub reports that repo as private or as gated with manual approval. Both, and HF_TOKEN, come from the environment or
 # from ~/.config/rhablation/upload.env (override the path with RHABLATION_UPLOAD_ENV). On the GPU box run it as root, never through
 # rhbench-run: the token must stay out of reach of the user that runs model-written code.
 set -euo pipefail
@@ -54,11 +54,12 @@ fi
 [ -n "$REPO" ] || die "no target repo: pass --repo or set HF_UPLOAD_REPO (environment or $UPLOAD_ENV)"
 export HF_TOKEN
 if [ "$PRIVATE" = 1 ]; then
-  # Sensitive data: never upload it to a repo that is (or was made) public.
+  # Sensitive data: only to a repo that is private, or public but gated with manual approval (the user's choice since
+  # 2026-11-23, to share it with Ethan). An ungated or auto-approved repo is refused.
   visibility=$(uv tool run --from huggingface_hub python -c \
-    'import sys; from huggingface_hub import HfApi; print(HfApi().repo_info(sys.argv[1], repo_type="dataset").private)' \
+    'import sys; from huggingface_hub import HfApi; i = HfApi().repo_info(sys.argv[1], repo_type="dataset"); print("ok" if i.private or i.gated == "manual" else f"private={i.private} gated={i.gated}")' \
     "$REPO") || die "could not check the visibility of $REPO"
-  [ "$visibility" = True ] || die "$REPO is not private on the Hub, refusing a --private upload"
+  [ "$visibility" = ok ] || die "$REPO is neither private nor gated with manual approval ($visibility), refusing a --private upload"
 fi
 
 RUN_ID="$(basename "$(cd "$RUN_DIR" && pwd)")"
