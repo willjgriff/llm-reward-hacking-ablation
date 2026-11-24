@@ -103,7 +103,7 @@ print("deny rules in", path, ":", deny)
 PY
 chmod 600 "$SETTINGS"
 echo "connectors this login would load without the flag:"
-(cd "$REPO_DIR" && timeout 60 "$CLAUDE_BIN" mcp list 2>&1 | grep -v "^Checking\|^$" | sed 's/^/  /') || true
+(cd "$REPO_DIR" && timeout -k 5 60 "$CLAUDE_BIN" mcp list </dev/null 2>&1 | grep -v "^Checking\|^$" | sed 's/^/  /') || true
 
 step "Isolation check (the benchmark user must not reach Claude's login)"
 if "$LAUNCHER" test -r "$HOME/.claude"; then die "the benchmark user can read $HOME/.claude; re-run scripts/setup_box.sh"; fi
